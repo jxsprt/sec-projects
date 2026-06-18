@@ -64,7 +64,7 @@ See [Learning Paths](https://sec-projects.pages.dev/resources/learning-paths.htm
 
 ```bash
 # Clone the repo
-git clone https://github.com/0xjaspreet/sec-projects.git
+git clone https://github.com/jxsprt/sec-projects.git
 cd sec-projects
 
 # Open in browser (static site, no build step)

@@ -29,7 +29,7 @@ function renderNav() {
         <button class="btn-icon" id="themeToggle" aria-label="Toggle theme" title="Toggle theme">
           &#x1F319;
         </button>
-        <a href="https://github.com/0xjaspreet/sec-projects" class="btn-icon" target="_blank" aria-label="GitHub" title="View on GitHub">
+        <a href="https://github.com/jxsprt/sec-projects" class="btn-icon" target="_blank" aria-label="GitHub" title="View on GitHub">
           &#x2197;
         </a>
       </div>
@@ -52,7 +52,7 @@ function renderFooter() {
     </p>
     <p style="margin-bottom: 0;">
       Built by <a href="https://jaspreetsec.com">Jaspreet Singh</a> &middot;
-      <a href="https://github.com/0xjaspreet/sec-projects">GitHub</a> &middot;
+      <a href="https://github.com/jxsprt/sec-projects">GitHub</a> &middot;
       Licensed under MIT
     </p>
   `;
