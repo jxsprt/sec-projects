@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Web Vulnerability Scanner — sec-projects</title>
+  <meta name="description" content="Build an automated scanner that checks for common web vulnerabilities — SQLi, XSS, CSRF, misconfigurations.">
+  <meta property="og:title" content="Web Vulnerability Scanner — sec-projects">
+  <meta property="og:description" content="Build an automated scanner that checks for common web vulnerabilities.">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://sec-projects.pages.dev/projects/web/web-vuln-scanner.html">
+  <link rel="canonical" href="https://sec-projects.pages.dev/projects/web/web-vuln-scanner.html">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/assets/css/theme.css">
+  <link rel="stylesheet" href="/assets/css/layout.css">
+  <link rel="stylesheet" href="/assets/css/components.css">
+</head>
+<body>
+<div class="container" style="max-width:900px; margin: calc(var(--nav-height) + var(--space-8)) auto var(--space-8); padding: 0 var(--space-6);">
+
+<div class="breadcrumbs">
+  <a href="/">Home</a><span class="breadcrumb-sep">/</span>
+  <a href="/?cat=web">Web Security</a><span class="breadcrumb-sep">/</span>
+  <span>Web Vulnerability Scanner</span>
+</div>
+
+<div style="margin-bottom:var(--space-8);">
+  <div style="display:flex;align-items:center;gap:var(--space-4);flex-wrap:wrap;margin-bottom:var(--space-3);">
+    <span class="badge badge-advanced">Advanced</span>
+    <span style="color:var(--color-text-muted);font-size:var(--font-size-sm);">&#x23F1; 4-6 hours</span>
+  </div>
+  <h1 style="border-bottom:none;margin-bottom:var(--space-3);">Web Vulnerability Scanner</h1>
+  <p style="font-size:var(--font-size-lg);color:var(--color-text-secondary);">Build an automated scanner that checks for common web vulnerabilities — SQLi, XSS, CSRF, misconfigurations.</p>
+  <div style="display:flex;flex-wrap:wrap;gap:var(--space-2);margin-top:var(--space-3);">
+    <span class="tag">python</span><span class="tag">http</span><span class="tag">web-security</span><span class="tag">owasp</span>
+  </div>
+</div>
+
+<div id="progressBtn" style="margin-bottom:var(--space-8);"></div>
+
+<h2>Learning Objectives</h2>
+<ul style="margin-left:var(--space-6);margin-bottom:var(--space-6);color:var(--color-text-secondary);">
+  <li>Send and parse HTTP requests/responses programmatically with the <code>requests</code> library</li>
+  <li>Check for missing or misconfigured security headers (HSTS, CSP, X-Frame-Options, etc.)</li>
+  <li>Implement automated SQL injection and XSS payload injection</li>
+  <li>Detect common misconfigurations like directory listing and exposed .git folders</li>
+  <li>Generate a structured vulnerability report with severity ratings</li>
+</ul>
+
+<h2>Prerequisites</h2>
+<ul style="margin-left:var(--space-6);margin-bottom:var(--space-6);color:var(--color-text-secondary);">
+  <li>Python 3.8+ with <code>requests</code> and <code>beautifulsoup4</code> installed</li>
+  <li>Understanding of HTTP methods, headers, status codes</li>
+  <li>Familiarity with OWASP Top 10 vulnerability categories</li>
+  <li>A deliberately vulnerable test target (DVWA, OWASP Juice Shop, or your own app)</li>
+</ul>
+
+<div class="callout">
+  <div class="callout-title">&#x26A0; Ethics & Legal</div>
+  <p>Only scan websites you own or have explicit written permission to test. Unauthorized vulnerability scanning is illegal and can trigger intrusion detection systems. Always test against local lab environments like <a href="https://github.com/digininja/DVWA">DVWA</a> or <a href="https://owasp.org/www-project-juice-shop/">OWASP Juice Shop</a>.</p>
+</div>
+
+<h2>Step 1: Security Header Audit</h2>
+<p>Start with passive checks — security headers are the easiest to verify and often the most neglected. Missing headers are a reliable signal of poor security posture.</p>
+
+<pre><code>import requests
+
+REQUIRED_HEADERS = {
+    'Strict-Transport-Security': {
+        'severity': 'high',
+        'desc': 'Enforces HTTPS. Missing = MITM risk.',
+        'recommendation': 'max-age=31536000; includeSubDomains'
+    },
+    'Content-Security-Policy': {
+        'severity': 'medium',
+        'desc': 'Prevents XSS and data injection.',
+        'recommendation': "default-src 'self'"
+    },
+    'X-Frame-Options': {
+        'severity': 'medium',
+        'desc': 'Prevents clickjacking.',
+        'recommendation': 'DENY or SAMEORIGIN'
+    },
+    'X-Content-Type-Options': {
+        'severity': 'low',
+        'desc': 'Prevents MIME sniffing.',
+        'recommendation': 'nosniff'
+    },
+    'Referrer-Policy': {
+        'severity': 'low',
+        'desc': 'Controls referrer information leakage.',
+        'recommendation': 'strict-origin-when-cross-origin'
+    },
+    'Permissions-Policy': {
+        'severity': 'low',
+        'desc': 'Restricts browser features (camera, mic, etc.).',
+        'recommendation': 'camera=(), microphone=(), geolocation=()'
+    },
+}
+
+def check_security_headers(url):
+    findings = []
+    try:
+        resp = requests.get(url, timeout=10, allow_redirects=True)
+        for header, info in REQUIRED_HEADERS.items():
+            if header not in resp.headers:
+                findings.append({
+                    'type': 'missing_header',
+                    'header': header,
+                    'severity': info['severity'],
+                    'description': info['desc'],
+                    'recommendation': info['recommendation'],
+                })
+        return findings, resp.headers
+    except requests.RequestException as e:
+        return [{'type': 'connection_error', 'error': str(e)}], {}
+
+findings, headers = check_security_headers('http://localhost:8080')
+for f in findings:
+    print(f"[{f.get('severity','error').upper()}] {f.get('header', f.get('error',''))}")
+    if 'recommendation' in f:
+        print(f"  Fix: {f['recommendation']}")</code></pre>
+
+<h2>Step 2: Common Misconfiguration Checks</h2>
+<p>Scan for exposed sensitive paths and misconfigurations that leak information or grant unintended access.</p>
+
+<pre><code>import concurrent.futures
+
+MISCONFIG_CHECKS = {
+    '/.git/HEAD': 'Exposed Git repository',
+    '/.env': 'Exposed environment file',
+    '/.DS_Store': 'macOS metadata file',
+    '/wp-config.php.bak': 'WordPress config backup',
+    '/backup/': 'Open backup directory',
+    '/phpinfo.php': 'PHP info disclosure',
+    '/server-status': 'Apache server status',
+    '/.htaccess': 'Apache config exposed',
+    '/admin/': 'Admin panel accessible',
+    '/console/': 'H2/Spring console',
+}
+
+def check_misconfigs(base_url, max_workers=10):
+    findings = []
+    def check_one(path, description):
+        url = base_url.rstrip('/') + path
+        try:
+            r = requests.get(url, timeout=5, allow_redirects=False)
+            if r.status_code in (200, 403):
+                findings.append({
+                    'type': 'misconfig',
+                    'url': url,
+                    'status': r.status_code,
+                    'description': description,
+                    'severity': 'high' if r.status_code == 200 else 'medium',
+                })
+        except:
+            pass
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as ex:
+        futures = [ex.submit(check_one, path, desc) for path, desc in MISCONFIG_CHECKS.items()]
+        concurrent.futures.wait(futures)
+
+    return findings</code></pre>
+
+<h2>Step 3: Automated XSS Probe</h2>
+<p>Detect reflected XSS by injecting benign payloads into query parameters and checking if they appear unescaped in the response.</p>
+
+<pre><code>from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
+
+XSS_PAYLOADS = [
+    '<script>alert("XSS")</script>',
+    '"><script>alert(1)</script>',
+    '<img src=x onerror=alert(1)>',
+    '\' onfocus=alert(1) autofocus>',
+    'javascript:alert(1)',
+]
+
+def probe_xss(url):
+    """Test GET parameters for reflected XSS."""
+    parsed = urlparse(url)
+    params = parse_qs(parsed.query, keep_blank_values=True)
+    findings = []
+
+    if not params:
+        return findings
+
+    for param_name in params:
+        original = params[param_name][0] if params[param_name] else ''
+        for payload in XSS_PAYLOADS:
+            test_params = dict(params)
+            test_params[param_name] = [payload]
+            new_query = urlencode(test_params, doseq=True)
+            test_url = urlunparse(parsed._replace(query=new_query))
+
+            try:
+                r = requests.get(test_url, timeout=5)
+                if payload in r.text and 'Content-Type' in r.headers:
+                    ct = r.headers['Content-Type']
+                    if 'text/html' in ct:
+                        findings.append({
+                            'type': 'reflected_xss',
+                            'parameter': param_name,
+                            'payload': payload,
+                            'severity': 'high',
+                            'url': test_url,
+                        })
+                        break  # One payload match per param is enough
+            except:
+                continue
+
+    return findings</code></pre>
+
+<h2>Step 4: SQL Injection Detection</h2>
+<p>Probe parameters with error-inducing payloads and analyze responses for database error messages.</p>
+
+<pre><code>SQLI_ERRORS = [
+    'SQL syntax', 'mysql_fetch', 'ORA-', 'PostgreSQL',
+    'SQLite', 'unclosed quotation mark', 'syntax error',
+    'Microsoft OLE DB', 'ODBC Driver', 'SQL command',
+    'Unknown column', 'Incorrect syntax',
+]
+
+SQLI_PROBES = [
+    "'",          # Break string
+    "\"",         # Break double-quoted string
+    "' OR '1'='1",  # Tautology
+    "' OR 1=1--",  # Tautology with comment
+    "1' AND SLEEP(5)--",  # Time-based (MySQL)
+    "1' AND '1'='1",  # Stacked
+]
+
+def probe_sqli(url):
+    parsed = urlparse(url)
+    params = parse_qs(parsed.query, keep_blank_values=True)
+    findings = []
+    if not params:
+        return findings
+
+    baseline = requests.get(url, timeout=5)
+
+    for param_name in params:
+        for probe in SQLI_PROBES:
+            test_params = dict(params)
+            test_params[param_name] = [probe]
+            new_query = urlencode(test_params, doseq=True)
+            test_url = urlunparse(parsed._replace(query=new_query))
+
+            try:
+                r = requests.get(test_url, timeout=10)
+                body = r.text.lower()
+
+                # Check for DB error messages
+                for err_sig in SQLI_ERRORS:
+                    if err_sig.lower() in body:
+                        findings.append({
+                            'type': 'sqli_error_based',
+                            'parameter': param_name,
+                            'payload': probe,
+                            'error_signature': err_sig,
+                            'severity': 'critical',
+                            'url': test_url,
+                        })
+                        return findings  # One confirmed finding per param
+
+                # Check for time-based (response significantly slower)
+                if 'SLEEP' in probe.upper() and r.elapsed.total_seconds() > 4:
+                    findings.append({
+                        'type': 'sqli_time_based',
+                        'parameter': param_name,
+                        'payload': probe,
+                        'response_time': r.elapsed.total_seconds(),
+                        'severity': 'critical',
+                        'url': test_url,
+                    })
+                    return findings
+
+            except requests.Timeout:
+                # Timeout >5s confirms time-based
+                if 'SLEEP' in probe.upper():
+                    findings.append({
+                        'type': 'sqli_time_based',
+                        'parameter': param_name,
+                        'payload': probe,
+                        'severity': 'critical',
+                    })
+                    return findings
+            except:
+                continue
+
+    return findings</code></pre>
+
+<h2>Step 5: Complete Scanner CLI</h2>
+<p>Assemble all modules into a single vulnerability scanner with arg-parsing and a formatted report.</p>
+
+<pre><code>import argparse, json
+from datetime import datetime
+
+def main():
+    parser = argparse.ArgumentParser(description="Web Vulnerability Scanner")
+    parser.add_argument("url", help="Target URL")
+    parser.add_argument("--headers-only", action="store_true", help="Only check headers")
+    parser.add_argument("--no-xss", action="store_true", help="Skip XSS probing")
+    parser.add_argument("--no-sqli", action="store_true", help="Skip SQLi probing")
+    parser.add_argument("-o", "--output", help="Save JSON report")
+    parser.add_argument("-t", "--threads", type=int, default=10, help="Thread count")
+    args = parser.parse_args()
+
+    url = args.url if args.url.startswith('http') else f'http://{args.url}'
+    all_findings = []
+
+    # 1. Headers
+    print("[*] Checking security headers...")
+    header_findings, _ = check_security_headers(url)
+    all_findings.extend(header_findings)
+    print(f"  -> {len(header_findings)} header issues found")
+
+    # 2. Misconfigs
+    print("[*] Checking common misconfigurations...")
+    misconfig_findings = check_misconfigs(url, args.threads)
+    all_findings.extend(misconfig_findings)
+    print(f"  -> {len(misconfig_findings)} misconfigs found")
+
+    # 3. XSS
+    if not args.no_xss and not args.headers_only:
+        print("[*] Probing for reflected XSS...")
+        xss_findings = probe_xss(url)
+        all_findings.extend(xss_findings)
+        print(f"  -> {len(xss_findings)} XSS findings")
+
+    # 4. SQLi
+    if not args.no_sqli and not args.headers_only:
+        print("[*] Probing for SQL injection...")
+        sqli_findings = probe_sqli(url)
+        all_findings.extend(sqli_findings)
+        print(f"  -> {len(sqli_findings)} SQLi findings")
+
+    # Report
+    report = {
+        'scan_time': datetime.now().isoformat(),
+        'target': url,
+        'total_findings': len(all_findings),
+        'severity_counts': {
+            'critical': sum(1 for f in all_findings if f.get('severity') == 'critical'),
+            'high': sum(1 for f in all_findings if f.get('severity') == 'high'),
+            'medium': sum(1 for f in all_findings if f.get('severity') == 'medium'),
+            'low': sum(1 for f in all_findings if f.get('severity') == 'low'),
+        },
+        'findings': all_findings,
+    }
+
+    print(f"\n{'='*60}")
+    print(f"  SCAN COMPLETE — {report['total_findings']} findings")
+    print(f"  Critical: {report['severity_counts']['critical']} | "
+          f"High: {report['severity_counts']['high']} | "
+          f"Medium: {report['severity_counts']['medium']} | "
+          f"Low: {report['severity_counts']['low']}")
+    print(f"{'='*60}")
+
+    if args.output:
+        with open(args.output, 'w') as f:
+            json.dump(report, f, indent=2)
+        print(f"\nReport saved to {args.output}")
+
+if __name__ == "__main__":
+    main()</code></pre>
+
+<h2>Testing Your Scanner</h2>
+<p>Set up a test target and run your scanner:</p>
+
+<pre><code># Option 1: OWASP Juice Shop (Docker)
+docker run -d -p 3000:3000 bkimminich/juice-shop
+
+# Option 2: DVWA (Docker)
+docker run -d -p 80:80 vulnerables/web-dvwa
+
+# Run the scanner
+python vuln_scanner.py http://localhost:3000
+python vuln_scanner.py http://localhost:3000 -o report.json</code></pre>
+
+<h2>Extension Ideas</h2>
+<ul style="margin-left:var(--space-6);margin-bottom:var(--space-6);color:var(--color-text-secondary);">
+  <li>Add CSRF token detection — check if forms include anti-CSRF tokens</li>
+  <li>Implement spidering/crawling to discover all pages and parameters automatically</li>
+  <li>Add CORS misconfiguration checks by testing cross-origin requests</li>
+  <li>Rate-limit requests with configurable delays to avoid overwhelming targets</li>
+  <li>Generate HTML reports with color-coded severity and remediation steps</li>
+</ul>
+
+<h2>Resources & Next Steps</h2>
+<div style="display:flex;flex-direction:column;gap:var(--space-2);margin-bottom:var(--space-8);">
+  <a class="resource-link" href="https://portswigger.net/web-security" target="_blank" rel="noopener">
+    <span class="resource-link-icon">&#x1F4D6;</span> PortSwigger Web Security Academy — Free interactive labs
+  </a>
+  <a class="resource-link" href="https://owasp.org/www-project-web-security-testing-guide/" target="_blank" rel="noopener">
+    <span class="resource-link-icon">&#x1F4D8;</span> OWASP Web Security Testing Guide
+  </a>
+  <a class="resource-link" href="https://tryhackme.com/room/owasptop102021" target="_blank" rel="noopener">
+    <span class="resource-link-icon">&#x1F3AF;</span> TryHackMe: OWASP Top 10 (2021)
+  </a>
+  <a class="resource-link" href="https://www.zaproxy.org/" target="_blank" rel="noopener">
+    <span class="resource-link-icon">&#x1F50D;</span> OWASP ZAP — Open-source scanner to compare against
+  </a>
+  <a class="resource-link" href="https://cheatsheetseries.owasp.org/" target="_blank" rel="noopener">
+    <span class="resource-link-icon">&#x1F4CB;</span> OWASP Cheat Sheet Series
+  </a>
+</div>
+
+<div class="callout">
+  <div class="callout-title">&#x1F393; Cert Relevance</div>
+  <p>This project maps directly to <strong>eWPT (eLearnSecurity Web Application Penetration Tester)</strong>, <strong>OSWE (Offensive Security Web Expert)</strong>, and the web security section of <strong>PNPT</strong>. Security header auditing and misconfiguration checks are tested on <strong>CompTIA Security+</strong> and <strong>CISSP</strong>.</p>
+</div>
+
+</div>
+
+<script src="/assets/js/data.js"></script>
+<script src="/assets/js/theme.js"></script>
+<script src="/assets/js/components.js"></script>
+<script src="/assets/js/progress.js"></script>
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+  document.body.prepend(renderNav());
+  document.body.appendChild(renderFooter());
+  const btnContainer = document.getElementById('progressBtn');
+  if (btnContainer) btnContainer.appendChild(renderProgressButton('web-vuln-scanner'));
+  initCopyButtons();
+});
+</script>
+</body>
+</html>

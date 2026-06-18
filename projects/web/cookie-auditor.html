@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Cookie & Session Auditor — sec-projects</title>
+  <meta name="description" content="Analyze website cookies for security flags — HttpOnly, Secure, SameSite — and generate a security report card.">
+  <meta property="og:title" content="Cookie & Session Auditor — sec-projects">
+  <meta property="og:description" content="Analyze website cookies for security flags and generate a security report card.">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://sec-projects.pages.dev/projects/web/cookie-auditor.html">
+  <link rel="canonical" href="https://sec-projects.pages.dev/projects/web/cookie-auditor.html">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/assets/css/theme.css">
+  <link rel="stylesheet" href="/assets/css/layout.css">
+  <link rel="stylesheet" href="/assets/css/components.css">
+</head>
+<body>
+<div class="container" style="max-width:900px; margin: calc(var(--nav-height) + var(--space-8)) auto var(--space-8); padding: 0 var(--space-6);">
+
+<div class="breadcrumbs">
+  <a href="/">Home</a><span class="breadcrumb-sep">/</span>
+  <a href="/?cat=web">Web Security</a><span class="breadcrumb-sep">/</span>
+  <span>Cookie & Session Auditor</span>
+</div>
+
+<div style="margin-bottom:var(--space-8);">
+  <div style="display:flex;align-items:center;gap:var(--space-4);flex-wrap:wrap;margin-bottom:var(--space-3);">
+    <span class="badge badge-beginner">Beginner</span>
+    <span style="color:var(--color-text-muted);font-size:var(--font-size-sm);">&#x23F1; 1-2 hours</span>
+  </div>
+  <h1 style="border-bottom:none;margin-bottom:var(--space-3);">Cookie & Session Auditor</h1>
+  <p style="font-size:var(--font-size-lg);color:var(--color-text-secondary);">Analyze website cookies for security flags — HttpOnly, Secure, SameSite — and generate a security report card.</p>
+  <div style="display:flex;flex-wrap:wrap;gap:var(--space-2);margin-top:var(--space-3);">
+    <span class="tag">python</span><span class="tag">http</span><span class="tag">cookies</span><span class="tag">session-security</span>
+  </div>
+</div>
+
+<div id="progressBtn" style="margin-bottom:var(--space-8);"></div>
+
+<h2>Learning Objectives</h2>
+<ul style="margin-left:var(--space-6);margin-bottom:var(--space-6);color:var(--color-text-secondary);">
+  <li>Understand cookie security attributes: HttpOnly, Secure, SameSite, Domain, Path, Expires</li>
+  <li>Programmatically inspect <code>Set-Cookie</code> response headers from any website</li>
+  <li>Detect session fixation risks from missing or weak session cookie configuration</li>
+  <li>Identify PII leakage via overly broad cookie scoping</li>
+  <li>Generate a security report card with actionable remediation steps</li>
+</ul>
+
+<h2>Prerequisites</h2>
+<ul style="margin-left:var(--space-6);margin-bottom:var(--space-6);color:var(--color-text-secondary);">
+  <li>Python 3.8+ with <code>requests</code> installed</li>
+  <li>Basic understanding of HTTP cookies and how browsers store them</li>
+  <li>Familiarity with the <code>Set-Cookie</code> header format</li>
+</ul>
+
+<div class="callout">
+  <div class="callout-title">&#x26A0; Ethics & Legal</div>
+  <p>Only audit websites you own or have permission to test. Cookie inspection is passive and low-risk, but repeated automated requests could be mistaken for scraping or probing.</p>
+</div>
+
+<h2>Step 1: Parse Set-Cookie Headers</h2>
+<p>Start by building a parser that extracts cookie attributes from HTTP response headers. The <code>Set-Cookie</code> header uses semicolons to separate attributes.</p>
+
+<pre><code>import requests
+from http.cookies import SimpleCookie
+
+class CookieAuditor:
+    def __init__(self, url):
+        self.url = url if url.startswith('http') else f'https://{url}'
+        self.cookies = []
+        self.findings = []
+
+    def fetch_cookies(self):
+        """Fetch all cookies from the target URL."""
+        try:
+            resp = requests.get(self.url, timeout=10, allow_redirects=True)
+            self.response_headers = dict(resp.headers)
+            self.final_url = resp.url
+
+            # Parse Set-Cookie from response
+            for header_value in resp.headers.get('Set-Cookie', '').split('\n'):
+                if header_value.strip():
+                    self.cookies.append(self._parse_cookie(header_value.strip()))
+            return True
+        except requests.RequestException as e:
+            self.findings.append({
+                'type': 'connection_error',
+                'description': str(e),
+                'severity': 'error',
+            })
+            return False
+
+    def _parse_cookie(self, raw_header):
+        """Parse a single Set-Cookie header into a dictionary."""
+        cookie = SimpleCookie()
+        cookie.load(raw_header)
+
+        info = {
+            'raw': raw_header,
+            'name': '',
+            'value': '',
+            'secure': False,
+            'httponly': False,
+            'samesite': 'Not set',
+            'path': '/',
+            'domain': '',
+            'max_age': None,
+            'expires': None,
+        }
+
+        for key, morsel in cookie.items():
+            info['name'] = key
+            info['value'] = morsel.value
+            info['secure'] = morsel.get('secure', False)
+            info['httponly'] = morsel.get('httponly', False)
+            info['samesite'] = morsel.get('samesite', 'Not set')
+            info['path'] = morsel.get('path', '/')
+            info['domain'] = morsel.get('domain', '')
+            info['max_age'] = morsel.get('max-age', None)
+
+        # Manual check for Secure/HttpOnly (SimpleCookie can miss them)
+        header_lower = raw_header.lower()
+        if 'secure' in header_lower:
+            info['secure'] = True
+        if 'httponly' in header_lower:
+            info['httponly'] = True
+
+        return info</code></pre>
+
+<h2>Step 2: Security Audit Checks</h2>
+<p>Apply security checks against each cookie, flagging missing attributes and weak configurations.</p>
+
+<pre><code>    def audit(self):
+        """Run all security checks against collected cookies."""
+        if not self.cookies:
+            self.findings.append({
+                'type': 'no_cookies',
+                'description': 'No cookies set by the server.',
+                'severity': 'info',
+            })
+            return self.findings
+
+        session_cookies = [c for c in self.cookies
+                          if any(kw in c['name'].lower() for kw in
+                                ['session', 'sid', 'auth', 'token', 'jsessionid', 'phpsessid'])]
+
+        for idx, cookie in enumerate(self.cookies):
+            name = cookie['name']
+
+            # 1. Missing Secure flag
+            if not cookie['secure'] and self.url.startswith('https'):
+                self.findings.append({
+                    'type': 'missing_secure_flag',
+                    'cookie': name,
+                    'severity': 'high',
+                    'description': f'Cookie "{name}" lacks the Secure flag — '
+                                   f'transmitted over unencrypted connections.',
+                    'remediation': 'Set "Secure" flag on the cookie.',
+                })
+
+            # 2. Missing HttpOnly
+            if not cookie['httponly'] and session_cookies and cookie in session_cookies:
+                self.findings.append({
+                    'type': 'missing_httponly',
+                    'cookie': name,
+                    'severity': 'high',
+                    'description': f'Session cookie "{name}" lacks HttpOnly — '
+                                   f'accessible to JavaScript (XSS risk).',
+                    'remediation': 'Set "HttpOnly" flag on all session cookies.',
+                })
+
+            # 3. SameSite analysis
+            if cookie['samesite'] == 'Not set':
+                self.findings.append({
+                    'type': 'missing_samesite',
+                    'cookie': name,
+                    'severity': 'medium',
+                    'description': f'Cookie "{name}" has no SameSite attribute — '
+                                   f'vulnerable to CSRF.',
+                    'remediation': 'Set SameSite=Lax (or Strict for sensitive cookies).',
+                })
+            elif cookie['samesite'].lower() == 'none' and not cookie['secure']:
+                self.findings.append({
+                    'type': 'samesite_none_without_secure',
+                    'cookie': name,
+                    'severity': 'critical',
+                    'description': f'SameSite=None requires Secure flag — browsers will reject.',
+                    'remediation': 'Add Secure flag when using SameSite=None.',
+                })
+
+            # 4. Overly broad Domain
+            if cookie['domain'] and cookie['domain'].count('.') <= 1:
+                self.findings.append({
+                    'type': 'broad_domain',
+                    'cookie': name,
+                    'severity': 'low',
+                    'description': f'Domain "{cookie["domain"]}" may be too broad.',
+                    'remediation': 'Scope to the most specific domain possible.',
+                })
+
+            # 5. Cookie with no expiration (session cookie)
+            if not cookie['max_age'] and not cookie['expires']:
+                # Session cookies are actually preferred for auth
+                pass
+
+        return self.findings</code></pre>
+
+<h2>Step 3: Report Card Generator</h2>
+<p>Transform audit findings into a readable report with a letter grade and per-cookie breakdown.</p>
+
+<pre><code>    def generate_report(self):
+        """Generate a security report card."""
+        findings = self.audit()
+        severities = {'critical': 4, 'high': 3, 'medium': 2, 'low': 1, 'info': 0}
+
+        report = {
+            'target': self.url,
+            'final_url': getattr(self, 'final_url', self.url),
+            'total_cookies': len(self.cookies),
+            'total_findings': len(findings),
+            'grade': 'A+',
+            'findings': findings,
+            'cookies': self.cookies,
+        }
+
+        # Calculate grade
+        high_sev = [f for f in findings if f['severity'] in ('critical', 'high')]
+        med_sev = [f for f in findings if f['severity'] == 'medium']
+        low_sev = [f for f in findings if f['severity'] == 'low']
+
+        if any(f['severity'] == 'critical' for f in findings):
+            report['grade'] = 'F'
+        elif len(high_sev) >= 2:
+            report['grade'] = 'D'
+        elif len(high_sev) == 1:
+            report['grade'] = 'C'
+        elif med_sev:
+            report['grade'] = 'B'
+        elif low_sev:
+            report['grade'] = 'A'
+        else:
+            report['grade'] = 'A+'
+
+        return report
+
+    def print_report(self, report):
+        print("\\n" + "=" * 60)
+        print(f"  🍪 COOKIE SECURITY AUDIT — {report['target']}")
+        print("=" * 60)
+        print(f"  Grade: {report['grade']}")
+        print(f"  Cookies found: {report['total_cookies']}")
+        print(f"  Issues: {report['total_findings']}")
+        print()
+
+        grade_colors = {'A+': '🟢', 'A': '🟢', 'B': '🟡', 'C': '🟠', 'D': '🔴', 'F': '⛔'}
+        print(f"  {grade_colors.get(report['grade'], '⚪')} Overall: {report['grade']}")
+        print()
+
+        for cookie in report['cookies']:
+            flags = []
+            if cookie['secure']: flags.append('🔒 Secure')
+            if cookie['httponly']: flags.append('🚫 HttpOnly')
+            if cookie['samesite'] != 'Not set': flags.append(f'🛡️ SameSite={cookie["samesite"]}')
+            flags_str = ' | '.join(flags) if flags else '⚠️ No protection flags'
+            print(f"  {cookie['name']}: {flags_str}")
+
+        if findings:
+            print(f"\\n  Findings:")
+            for f in findings:
+                sev_icon = {'critical':'🔴','high':'🟠','medium':'🟡','low':'🔵'}.get(f['severity'],'⚪')
+                print(f"  {sev_icon} [{f['severity'].upper()}] {f.get('cookie','?')}: {f['description'][:100]}")
+                if 'remediation' in f:
+                    print(f"     ↳ Fix: {f['remediation']}")
+        print("=" * 60)
+
+
+# Usage
+auditor = CookieAuditor('https://example.com')
+if auditor.fetch_cookies():
+    report = auditor.generate_report()
+    auditor.print_report(report)</code></pre>
+
+<h2>Testing Your Auditor</h2>
+<p>Test against sites with deliberately weak cookie configurations:</p>
+<pre><code># Test against local DVWA
+python cookie_auditor.py http://localhost/dvwa
+
+# Test against a public site (passive, read-only)
+python cookie_auditor.py https://httpbin.org/cookies/set?session=abc123
+
+# Batch audit multiple sites
+python cookie_auditor.py --batch sites.txt -o audit_report.json</code></pre>
+
+<h2>Extension Ideas</h2>
+<ul style="margin-left:var(--space-6);margin-bottom:var(--space-6);color:var(--color-text-secondary);">
+  <li>Add cookie prefix checks — <code>__Host-</code> and <code>__Secure-</code> prefixes for enhanced security</li>
+  <li>Detect cookie tossing attacks — multiple cookies with the same name at different paths</li>
+  <li>Implement batch auditing from a URL list with HTML report generation</li>
+  <li>Add session entropy analysis — estimate cookie randomness to detect weak session IDs</li>
+  <li>Compare cookie configurations across subdomains to find scoping inconsistencies</li>
+</ul>
+
+<h2>Resources & Next Steps</h2>
+<div style="display:flex;flex-direction:column;gap:var(--space-2);margin-bottom:var(--space-8);">
+  <a class="resource-link" href="https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Set-Cookie" target="_blank" rel="noopener">
+    <span class="resource-link-icon">&#x1F4D6;</span> MDN: Set-Cookie — Complete attribute reference
+  </a>
+  <a class="resource-link" href="https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html" target="_blank" rel="noopener">
+    <span class="resource-link-icon">&#x1F4CB;</span> OWASP Session Management Cheat Sheet
+  </a>
+  <a class="resource-link" href="https://portswigger.net/web-security/csrf" target="_blank" rel="noopener">
+    <span class="resource-link-icon">&#x1F4D8;</span> PortSwigger: CSRF — Why SameSite matters
+  </a>
+  <a class="resource-link" href="https://web.dev/articles/samesite-cookies-explained" target="_blank" rel="noopener">
+    <span class="resource-link-icon">&#x1F310;</span> web.dev: SameSite Cookies Explained
+  </a>
+  <a class="resource-link" href="https://datatracker.ietf.org/doc/html/rfc6265" target="_blank" rel="noopener">
+    <span class="resource-link-icon">&#x1F4DC;</span> RFC 6265 — HTTP State Management Mechanism
+  </a>
+</div>
+
+<div class="callout">
+  <div class="callout-title">&#x1F393; Cert Relevance</div>
+  <p>Cookie security is tested on <strong>CompTIA Security+</strong> (secure application development, SY0-701 objective 3.2), <strong>CISSP</strong> (Domain 8: Software Development Security), and <strong>eWPT</strong> (session management vulnerabilities). Understanding HttpOnly/Secure/SameSite is essential for the <strong>Burp Suite Certified Practitioner</strong> exam.</p>
+</div>
+
+</div>
+
+<script src="/assets/js/data.js"></script>
+<script src="/assets/js/theme.js"></script>
+<script src="/assets/js/components.js"></script>
+<script src="/assets/js/progress.js"></script>
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+  document.body.prepend(renderNav());
+  document.body.appendChild(renderFooter());
+  const btnContainer = document.getElementById('progressBtn');
+  if (btnContainer) btnContainer.appendChild(renderProgressButton('cookie-auditor'));
+  initCopyButtons();
+});
+</script>
+</body>
+</html>

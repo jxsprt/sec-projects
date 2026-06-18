@@ -1,0 +1,693 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Keylogger Detector — sec-projects</title>
+  <meta name="description" content="Build a behavioral keylogger detector — monitor keyboard device files, detect hooks, and analyze process behavior for keylogging indicators.">
+
+  <meta property="og:title" content="Keylogger Detector — sec-projects">
+  <meta property="og:description" content="Build a behavioral keylogger detector — monitor device files, hooks, and process behavior.">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://sec-projects.pages.dev/projects/advanced/keylogger-detector.html">
+
+  <link rel="canonical" href="https://sec-projects.pages.dev/projects/advanced/keylogger-detector.html">
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+  <link rel="stylesheet" href="/assets/css/theme.css">
+  <link rel="stylesheet" href="/assets/css/layout.css">
+  <link rel="stylesheet" href="/assets/css/components.css">
+</head>
+<body>
+  <div class="container" style="max-width:900px; margin: calc(var(--nav-height) + var(--space-8)) auto var(--space-8); padding: 0 var(--space-6);">
+
+    <!-- Breadcrumbs -->
+    <div class="breadcrumbs">
+      <a href="/">Home</a>
+      <span class="breadcrumb-sep">/</span>
+      <a href="/?cat=advanced">Advanced</a>
+      <span class="breadcrumb-sep">/</span>
+      <span>Keylogger Detector</span>
+    </div>
+
+    <!-- Header -->
+    <div style="margin-bottom:var(--space-8);">
+      <div style="display:flex;align-items:center;gap:var(--space-4);flex-wrap:wrap;margin-bottom:var(--space-3);">
+        <span class="badge badge-advanced">Advanced</span>
+        <span style="color:var(--color-text-muted);font-size:var(--font-size-sm);">&#x23F1; 3-4 hours</span>
+      </div>
+      <h1 style="border-bottom:none;margin-bottom:var(--space-3);">Keylogger Detector</h1>
+      <p style="font-size:var(--font-size-lg);color:var(--color-text-secondary);">Build a behavioral keylogger detector — monitor keyboard device files, hook detection, process behavior analysis.</p>
+      <div style="display:flex;flex-wrap:wrap;gap:var(--space-2);margin-top:var(--space-3);">
+        <span class="tag">python</span>
+        <span class="tag">linux</span>
+        <span class="tag">process-analysis</span>
+        <span class="tag">malware-detection</span>
+      </div>
+    </div>
+
+    <!-- Progress Button -->
+    <div id="progressBtn" style="margin-bottom:var(--space-8);"></div>
+
+    <!-- Learning Objectives -->
+    <h2>Learning Objectives</h2>
+    <ul style="margin-left:var(--space-6);margin-bottom:var(--space-6);color:var(--color-text-secondary);">
+      <li>Understand how keyloggers operate at the OS level — device file reads, X11 hooks, kernel modules</li>
+      <li>Learn to monitor Linux input subsystems (<code>/dev/input/</code>) for unauthorized readers</li>
+      <li>Detect X11-based keyloggers that hook into the display server's event stream</li>
+      <li>Analyze process behavior: file descriptor usage, library injection, suspicious syscall patterns</li>
+      <li>Build a detection engine that combines multiple signals for accurate malware identification</li>
+    </ul>
+
+    <!-- Prerequisites -->
+    <h2>Prerequisites</h2>
+    <ul style="margin-left:var(--space-6);margin-bottom:var(--space-6);color:var(--color-text-secondary);">
+      <li>Python 3.8+ running on a Linux system with X11 (Ubuntu Desktop recommended)</li>
+      <li><code>python3-xlib</code> for X11 monitoring (<code>pip install python3-xlib</code>)</li>
+      <li><code>psutil</code> for process analysis (<code>pip install psutil</code>)</li>
+      <li>Root access for device monitoring (sudo)</li>
+      <li>Understanding of Linux /proc filesystem and process management</li>
+    </ul>
+
+    <div class="callout">
+      <div class="callout-title">&#x26A0; Detection Scope</div>
+      <p>This detector targets <strong>userspace keyloggers</strong> — the most common type found in CTFs and real-world incidents. Kernel-level keyloggers (rootkits) require kernel module analysis, which is beyond this scope. For educational purposes, you can test against intentionally installed benign keyloggers like <code>lkl</code> or <code>logkeys</code> in a VM.</p>
+    </div>
+
+    <!-- Step 1 -->
+    <h2>Step 1: Monitor /dev/input for Suspicious Readers</h2>
+    <p>Linux exposes keyboard input through <code>/dev/input/event*</code> device files. Any process reading directly from these files (besides the X server or Wayland compositor) is highly suspicious — this is the most common keylogger technique.</p>
+
+    <pre><code>import os
+import time
+import psutil
+import glob
+from datetime import datetime
+from collections import defaultdict
+
+class InputDeviceMonitor:
+    """Monitor /dev/input/ device files for unauthorized readers."""
+
+    # Known-legitimate processes that read keyboard input
+    LEGITIMATE_READERS = {
+        "Xorg", "X", "Xwayland", "gdm-x-session",
+        "gnome-shell", "kwin_x11", "weston",
+        "systemd-logind", "acpid"
+    }
+
+    def __init__(self):
+        self.device_files = self._find_input_devices()
+        self.alert_history = defaultdict(list)
+
+    def _find_input_devices(self) -> list:
+        """Discover keyboard input devices in /dev/input/ and /proc/bus/input/."""
+        devices = []
+
+        # /dev/input/by-path/ symlinks often point to actual keyboards
+        for pattern in ["/dev/input/event*", "/dev/input/by-path/*kbd*"]:
+            devices.extend(glob.glob(pattern))
+
+        # Filter to only keyboard devices by checking /proc/bus/input/devices
+        keyboard_events = self._get_keyboard_events()
+        devices = [d for d in devices if os.path.basename(d) in keyboard_events or
+                   "event" in d]
+
+        return list(set(devices))  # Deduplicate
+
+    def _get_keyboard_events(self) -> set:
+        """Parse /proc/bus/input/devices to find keyboard event handlers."""
+        keyboard_events = set()
+        try:
+            with open("/proc/bus/input/devices") as f:
+                content = f.read()
+
+            for block in content.split("\n\n"):
+                if "kbd" in block.lower() or "keyboard" in block.lower():
+                    for line in block.split("\n"):
+                        if line.startswith("H: Handlers="):
+                            # Extract event numbers: "Handlers=sysrq kbd event3"
+                            for token in line.split("=")[1].split():
+                                if token.startswith("event"):
+                                    keyboard_events.add(token)
+        except:
+            pass
+        return keyboard_events
+
+    def find_readers(self) -> list:
+        """Find processes that have /dev/input/ files open for reading."""
+
+        alerts = []
+        checked_pids = set()
+
+        for device_path in self.device_files:
+            try:
+                # Parse /proc/*/fd to find processes with this device open
+                for pid_dir in glob.glob("/proc/[0-9]*"):
+                    pid = int(os.path.basename(pid_dir))
+
+                    if pid in checked_pids:
+                        continue
+                    checked_pids.add(pid)
+
+                    try:
+                        fd_dir = os.path.join(pid_dir, "fd")
+                        if not os.path.isdir(fd_dir):
+                            continue
+
+                        for fd_link in glob.glob(os.path.join(fd_dir, "*")):
+                            try:
+                                target = os.readlink(fd_link)
+                                if device_path in target:
+                                    # Found a reader — check if it's legitimate
+                                    process_name = self._get_process_name(pid)
+                                    fd_num = int(os.path.basename(fd_link))
+
+                                    # Check access mode
+                                    fd_info_path = f"/proc/{pid}/fdinfo/{fd_num}"
+                                    access_mode = self._get_fd_access_mode(fd_info_path)
+
+                                    if process_name not in self.LEGITIMATE_READERS:
+                                        alerts.append({
+                                            "timestamp": datetime.now().isoformat(),
+                                            "pid": pid,
+                                            "process": process_name,
+                                            "device": device_path,
+                                            "access_mode": access_mode,
+                                            "severity": "CRITICAL",
+                                            "reason": f"Non-standard process reading keyboard device"
+                                        })
+                                    break  # Don't check other fds for this pid
+                            except (OSError, ValueError):
+                                continue
+                    except (PermissionError, FileNotFoundError):
+                        continue
+
+            except Exception as e:
+                pass
+
+        return alerts
+
+    def _get_process_name(self, pid: int) -> str:
+        """Get process name from /proc/PID/comm."""
+        try:
+            with open(f"/proc/{pid}/comm") as f:
+                return f.read().strip()
+        except:
+            return f"unknown-{pid}"
+
+    def _get_fd_access_mode(self, fdinfo_path: str) -> str:
+        """Determine if a file descriptor is opened for reading or writing."""
+        try:
+            with open(fdinfo_path) as f:
+                info = f.read()
+
+            # Look for flags in fdinfo
+            # O_RDONLY=0, O_WRONLY=1, O_RDWR=2
+            for line in info.split("\n"):
+                if line.startswith("flags:"):
+                    flags = int(line.split(":")[1].strip(), 8)
+                    if flags & 0x3 == 0:
+                        return "READ"
+                    elif flags & 0x3 == 2:
+                        return "READ/WRITE"
+                    else:
+                        return "WRITE"
+            return "UNKNOWN"
+        except:
+            return "UNKNOWN"
+
+# Monitor devices
+monitor = InputDeviceMonitor()
+print(f"Monitoring {len(monitor.device_files)} input device(s):")
+for dev in monitor.device_files:
+    print(f"  - {dev}")
+
+alerts = monitor.find_readers()
+if alerts:
+    for alert in alerts:
+        print(f"[{alert['severity']}] PID {alert['pid']}: {alert['process']} "
+              f"reading {alert['device']} ({alert['access_mode']})")
+else:
+    print("✅ No unauthorized keyboard device readers detected")</code></pre>
+
+    <!-- Step 2 -->
+    <h2>Step 2: X11 Keyboard Grab Detection</h2>
+    <p>More sophisticated keyloggers hook into the X11 event system using <code>XGrabKey</code> or by recording all keystrokes through <code>XRecord</code>. Detect these by monitoring the X11 server for suspicious event listeners.</p>
+
+    <pre><code>from Xlib import display, X
+from Xlib.ext import record
+from Xlib.protocol import rq
+
+class X11KeyloggerDetector:
+    """Detect X11-based keyloggers by analyzing active grabs and extensions."""
+
+    def __init__(self):
+        try:
+            self.disp = display.Display()
+        except:
+            self.disp = None
+            print("⚠️  Cannot connect to X display — X11 detection disabled")
+
+    def check_keyboard_grabs(self) -> list:
+        """Check for active keyboard grabs (XGrabKey) that could indicate keyloggers."""
+        if not self.disp:
+            return []
+
+        alerts = []
+        try:
+            root = self.disp.screen().root
+
+            # Query the list of passive grabs on the root window
+            # This requires X server cooperation — some servers block this
+            try:
+                # Check if any application has grabbed "AnyKey"
+                grabs = root.query_tree()
+            except:
+                return []
+
+        except Exception as e:
+            print(f"X11 grab check error: {e}")
+
+        return alerts
+
+    def find_recording_clients(self) -> list:
+        """Detect if any process is using the X Record extension (common keylogger technique).
+
+        The RECORD extension allows capturing all keyboard events across all windows.
+        Legitimate uses: screen recording (OBS), accessibility tools.
+        Suspicious: unknown processes using RECORD without user knowledge.
+        """
+
+        alerts = []
+        if not self.disp:
+            return alerts
+
+        # Check for processes with X11 connections that could be recording
+        # We look at /proc/*/fd for socket connections to the X11 server
+        x11_socket_path = f"/tmp/.X11-unix/X{self.disp.get_display_name().split(':')[-1].split('.')[0]}"
+
+        import glob as _glob
+        for pid_dir in _glob.glob("/proc/[0-9]*"):
+            pid = int(os.path.basename(pid_dir))
+            try:
+                fd_dir = os.path.join(pid_dir, "fd")
+                for fd_link in _glob.glob(os.path.join(fd_dir, "*")):
+                    try:
+                        target = os.readlink(fd_link)
+                        if x11_socket_path in target:
+                            proc_name = self._get_proc_comm(pid)
+                            # Known legitimate X11 apps
+                            legit_apps = {"Xorg", "gnome-shell", "kwin_x11",
+                                         "ibus-daemon", "fcitx", "gnome-terminal-server"}
+                            if proc_name not in legit_apps:
+                                alerts.append({
+                                    "pid": pid,
+                                    "process": proc_name,
+                                    "severity": "HIGH",
+                                    "reason": "Unknown process connected to X11 — could be recording keystrokes"
+                                })
+                    except:
+                        continue
+            except:
+                continue
+
+        return alerts
+
+    def _get_proc_comm(self, pid: int) -> str:
+        try:
+            with open(f"/proc/{pid}/comm") as f:
+                return f.read().strip()
+        except:
+            return "unknown"
+
+# Run X11 detection
+x11_detector = X11KeyloggerDetector()
+x11_alerts = x11_detector.find_recording_clients()
+for alert in x11_alerts:
+    print(f"[{alert['severity']}] PID {alert['pid']}: {alert['process']} — {alert['reason']}")</code></pre>
+
+    <!-- Step 3 -->
+    <h2>Step 3: Process Behavior Analysis</h2>
+    <p>Keyloggers exhibit telltale behaviors: opening many files rapidly (logging keystrokes), unusual network connections (exfiltrating data), and hidden process indicators.</p>
+
+    <pre><code>import psutil
+import socket
+from datetime import datetime, timedelta
+
+class BehavioralAnalyzer:
+    """Analyze process behavior for keylogger-like patterns."""
+
+    KEYLOGGER_INDICATORS = {
+        "file_intensive": {
+            "description": "Process is writing to files frequently (potential keylogger log)",
+            "threshold_writes_per_min": 100,
+            "min_runtime_seconds": 30,
+        },
+        "hidden_process": {
+            "description": "Process with hidden/obfuscated command line or from suspicious path",
+            "suspicious_paths": ["/tmp/", "/dev/shm/", "/var/tmp/", ".hidden"],
+        },
+        "network_exfil": {
+            "description": "Process sending data to external IP on non-standard ports",
+            "common_exfil_ports": {21, 4444, 5555, 6666, 7777, 8080, 8443, 31337, 12345, 54321},
+        },
+        "low_key_persistence": {
+            "description": "Process surviving parent termination (daemonized keylogger)",
+            "check_ppid": True,
+        },
+        "proc_hiding": {
+            "description": "Process with mismatched /proc/pid/comm vs /proc/pid/cmdline",
+            "check_comm": True,
+        },
+    }
+
+    def __init__(self):
+        self.baseline = self._collect_baseline()
+        self.baseline_time = datetime.now()
+
+    def _collect_baseline(self) -> dict:
+        """Collect a baseline snapshot of processes and their I/O counters."""
+        baseline = {}
+        for proc in psutil.process_iter(['pid', 'name', 'io_counters']):
+            try:
+                info = proc.info
+                baseline[info['pid']] = {
+                    'name': info['name'],
+                    'write_bytes': info['io_counters'].write_bytes if info['io_counters'] else 0,
+                    'read_bytes': info['io_counters'].read_bytes if info['io_counters'] else 0,
+                }
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+        return baseline
+
+    def scan(self) -> list:
+        """Perform a full behavioral scan and return alerts."""
+        alerts = []
+        elapsed = (datetime.now() - self.baseline_time).total_seconds()
+
+        for proc in psutil.process_iter(['pid', 'name', 'ppid', 'exe', 'cmdline',
+                                          'io_counters', 'connections', 'create_time']):
+            try:
+                info = proc.info
+                pid = info['pid']
+
+                # Skip our own process and system processes
+                if pid == os.getpid() or pid <= 1:
+                    continue
+
+                # Check 1: File I/O intensity (potential logging)
+                if pid in self.baseline and elapsed > 30:
+                    prev = self.baseline[pid]
+                    curr_writes = info['io_counters'].write_bytes if info['io_counters'] else 0
+                    prev_writes = prev['write_bytes']
+
+                    writes_per_min = ((curr_writes - prev_writes) / elapsed) * 60
+
+                    if writes_per_min > self.KEYLOGGER_INDICATORS['file_intensive']['threshold_writes_per_min']:
+                        alerts.append({
+                            "pid": pid,
+                            "process": info['name'],
+                            "severity": "MEDIUM",
+                            "indicator": "file_intensive",
+                            "detail": f"Writing {int(writes_per_min)} bytes/min to disk — unusual I/O activity"
+                        })
+
+                # Check 2: Hidden/suspicious process
+                exe_path = info.get('exe', '')
+                for suspicious in self.KEYLOGGER_INDICATORS['hidden_process']['suspicious_paths']:
+                    if suspicious in exe_path:
+                        alerts.append({
+                            "pid": pid,
+                            "process": info['name'],
+                            "severity": "HIGH",
+                            "indicator": "hidden_process",
+                            "detail": f"Running from suspicious location: {exe_path}"
+                        })
+                        break
+
+                # Check 3: Network exfiltration
+                try:
+                    connections = info.get('connections')
+                    if connections:
+                        for conn in connections:
+                            if conn.status == 'ESTABLISHED' and conn.raddr:
+                                raddr = conn.raddr
+                                if raddr.port in self.KEYLOGGER_INDICATORS['network_exfil']['common_exfil_ports']:
+                                    # Skip loopback
+                                    if not raddr.ip.startswith('127.'):
+                                        alerts.append({
+                                            "pid": pid,
+                                            "process": info['name'],
+                                            "severity": "CRITICAL",
+                                            "indicator": "network_exfil",
+                                            "detail": f"Connection to {raddr.ip}:{raddr.port} — potential data exfiltration"
+                                        })
+                except:
+                    pass
+
+                # Check 4: Daemonized process (ppid == 1 means parent died)
+                ppid = info.get('ppid', -1)
+                if ppid == 1 and info.get('create_time', 0) > (datetime.now() - timedelta(minutes=5)).timestamp():
+                    alerts.append({
+                        "pid": pid,
+                        "process": info['name'],
+                        "severity": "LOW",
+                        "indicator": "daemonized",
+                        "detail": "Recently daemonized process — could be persistence mechanism"
+                    })
+
+                # Check 5: Process name vs cmdline mismatch
+                cmdline = info.get('cmdline', [])
+                if cmdline and len(cmdline) > 1:
+                    comm_name = info['name']
+                    exec_name = os.path.basename(cmdline[0])
+                    if comm_name != exec_name and comm_name != f"{exec_name}:":
+                        alerts.append({
+                            "pid": pid,
+                            "process": info['name'],
+                            "severity": "HIGH",
+                            "indicator": "name_mismatch",
+                            "detail": f"Process name '{comm_name}' doesn't match executable '{exec_name}' — potential masquerading"
+                        })
+
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+
+        return alerts
+
+# Run behavioral scan
+analyzer = BehavioralAnalyzer()
+print("Waiting for baseline collection (30 seconds minimum)...")
+time.sleep(2)  # Short wait for demo; in production, wait longer
+
+alerts = analyzer.scan()
+if alerts:
+    print(f"\n⚠️  {len(alerts)} behavioral alerts:")
+    for alert in alerts:
+        print(f"  [{alert['severity']}] PID {alert['pid']}: {alert['process']}")
+        print(f"        {alert['indicator']}: {alert['detail']}")
+else:
+    print("✅ No behavioral indicators detected")</code></pre>
+
+    <!-- Step 4 -->
+    <h2>Step 4: Comprehensive Detector CLI</h2>
+    <p>Combine all detection modules into a single tool that runs continuously or on-demand.</p>
+
+    <pre><code>import argparse
+import time
+import json
+import sys
+
+class KeyloggerDetector:
+    """Unified keylogger detection system combining multiple detection strategies."""
+
+    def __init__(self):
+        self.input_monitor = InputDeviceMonitor()
+        self.x11_detector = X11KeyloggerDetector()
+        self.behavioral = BehavioralAnalyzer()
+        self.all_alerts = []
+
+    def full_scan(self) -> list:
+        """Run all detection modules and return consolidated alerts."""
+
+        print("=" * 60)
+        print("  KEYLOGGER DETECTOR — Full Scan")
+        print("=" * 60)
+        print()
+
+        # 1. Device file monitoring
+        print("[1/3] Checking /dev/input readers...")
+        device_alerts = self.input_monitor.find_readers()
+        if device_alerts:
+            print(f"      ⚠️  {len(device_alerts)} alerts")
+        else:
+            print("      ✅ Clean")
+        self.all_alerts.extend(device_alerts)
+
+        # 2. X11 monitoring
+        print("[2/3] Checking X11 keyboard hooks...")
+        x11_alerts = self.x11_detector.find_recording_clients()
+        if x11_alerts:
+            print(f"      ⚠️  {len(x11_alerts)} alerts")
+        else:
+            print("      ✅ Clean")
+        self.all_alerts.extend(x11_alerts)
+
+        # 3. Behavioral analysis
+        print("[3/3] Analyzing process behavior...")
+        behavioral_alerts = self.behavioral.scan()
+        if behavioral_alerts:
+            print(f"      ⚠️  {len(behavioral_alerts)} alerts")
+        else:
+            print("      ✅ Clean")
+        self.all_alerts.extend(behavioral_alerts)
+
+        return self.all_alerts
+
+    def print_report(self):
+        """Print a formatted detection report."""
+        if not self.all_alerts:
+            print("\n" + "=" * 60)
+            print("  ✅ CLEAN — No keylogger indicators detected")
+            print("=" * 60)
+            return
+
+        # Sort by severity
+        severity_order = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3}
+        self.all_alerts.sort(key=lambda a: severity_order.get(a.get("severity", "LOW"), 99))
+
+        print("\n" + "=" * 60)
+        print(f"  ⚠️  {len(self.all_alerts)} POTENTIAL KEYLOGGER INDICATORS FOUND")
+        print("=" * 60)
+
+        for alert in self.all_alerts:
+            print(f"\n  [{alert.get('severity', 'LOW'):8s}] "
+                  f"PID {alert.get('pid', '?')}: {alert.get('process', 'unknown')}")
+            if 'reason' in alert:
+                print(f"  {'':10s} {alert['reason']}")
+            elif 'detail' in alert:
+                print(f"  {'':10s} {alert['detail']}")
+
+        print("\n" + "=" * 60)
+        print("  NOTE: Some alerts may be false positives.")
+        print("  Investigate each alert manually before taking action.")
+        print("=" * 60)
+
+    def save_report(self, path: str = "keylogger_detection_report.json"):
+        """Save detection results to JSON file."""
+        report = {
+            "scan_time": datetime.now().isoformat(),
+            "hostname": os.uname().nodename,
+            "total_alerts": len(self.all_alerts),
+            "alerts": self.all_alerts
+        }
+        with open(path, "w") as f:
+            json.dump(report, f, indent=2)
+        print(f"\nReport saved to {path}")
+
+    def monitor_continuous(self, interval: int = 60):
+        """Run continuous monitoring — re-scan every N seconds."""
+        print(f"Starting continuous monitoring (interval: {interval}s)")
+        print("Press Ctrl+C to stop\n")
+
+        try:
+            while True:
+                self.all_alerts = []
+                print(f"\n[SCAN] {datetime.now().strftime('%H:%M:%S')}")
+                self.full_scan()
+                if self.all_alerts:
+                    self.print_report()
+                    self.save_report()
+                time.sleep(interval)
+        except KeyboardInterrupt:
+            print("\n[STOP] Monitoring stopped.")
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Keylogger Detector — detect keylogging malware behaviorally"
+    )
+    parser.add_argument("--continuous", "-c", action="store_true",
+                        help="Run in continuous monitoring mode")
+    parser.add_argument("--interval", "-i", type=int, default=60,
+                        help="Monitoring interval in seconds (default: 60)")
+    parser.add_argument("--output", "-o", default="keylogger_detection_report.json",
+                        help="Output file for JSON report")
+
+    args = parser.parse_args()
+
+    detector = KeyloggerDetector()
+
+    if args.continuous:
+        detector.monitor_continuous(args.interval)
+    else:
+        detector.full_scan()
+        detector.print_report()
+        detector.save_report(args.output)
+
+if __name__ == "__main__":
+    main()</code></pre>
+
+    <!-- Testing -->
+    <h2>Testing Your Detector</h2>
+    <p>Verify the detector catches real keyloggers in a safe VM:</p>
+    <ul style="margin-left:var(--space-6);margin-bottom:var(--space-6);color:var(--color-text-secondary);">
+      <li><strong>Install a benign keylogger:</strong> <code>sudo apt install logkeys</code> (Ubuntu) — start it and verify your detector finds it reading <code>/dev/input/</code></li>
+      <li><strong>X11 keylogger test:</strong> Run a Python script that opens an X11 display connection — your detector should flag it</li>
+      <li><strong>False positive check:</strong> Run on a clean system — should not flag Xorg, terminal emulators, or accessibility tools</li>
+      <li><strong>Network exfil test:</strong> Write a test script that connects to a non-standard port and writes rapidly — should trigger behavioral alerts</li>
+    </ul>
+
+    <!-- Extensions -->
+    <h2>Extension Ideas</h2>
+    <ul style="margin-left:var(--space-6);margin-bottom:var(--space-6);color:var(--color-text-secondary);">
+      <li><strong>LD_PRELOAD detection:</strong> Scan process environments for suspicious library preloads that could hook input functions</li>
+      <li><strong>ptrace detection:</strong> Detect processes being traced (some keyloggers use ptrace to intercept syscalls)</li>
+      <li><strong>Wayland support:</strong> Extend detection for Wayland compositors, which have different input handling</li>
+      <li><strong>Signature database:</strong> Build a database of known keylogger hashes and file paths for signature-based detection</li>
+      <li><strong>Kernel module scanner:</strong> Detect loaded kernel modules that hook input subsystems directly</li>
+    </ul>
+
+    <!-- Resources -->
+    <h2>Resources &amp; Next Steps</h2>
+    <div style="display:flex;flex-direction:column;gap:var(--space-2);margin-bottom:var(--space-8);">
+      <a class="resource-link" href="https://www.kernel.org/doc/html/latest/input/input.html" target="_blank" rel="noopener">
+        <span class="resource-link-icon">&#x1F4D6;</span> Linux Kernel Input Subsystem Documentation
+      </a>
+      <a class="resource-link" href="https://attack.mitre.org/techniques/T1056/" target="_blank" rel="noopener">
+        <span class="resource-link-icon">&#x1F4DC;</span> MITRE ATT&amp;CK: Input Capture (T1056)
+      </a>
+      <a class="resource-link" href="https://psutil.readthedocs.io/" target="_blank" rel="noopener">
+        <span class="resource-link-icon">&#x1F4D8;</span> psutil — Cross-platform Process &amp; System Monitoring
+      </a>
+      <a class="resource-link" href="https://github.com/kernc/logkeys" target="_blank" rel="noopener">
+        <span class="resource-link-icon">&#x1F41B;</span> logkeys — Linux Keylogger (for testing your detector)
+      </a>
+    </div>
+
+    <!-- Cert Relevance -->
+    <div class="callout">
+      <div class="callout-title">&#x1F393; Cert Relevance</div>
+      <p>Malware detection and behavioral analysis are core topics for <strong>CompTIA CySA+</strong> (threat detection, behavioral analytics) and <strong>CISSP Domain 7</strong> (security operations, incident response). Understanding how keyloggers operate at the OS level is essential for <strong>GIAC GCFA</strong> (forensic analysis) and <strong>OSCP</strong> — where post-exploitation often involves deploying keyloggers for credential harvesting. The process analysis techniques map directly to DFIR (Digital Forensics &amp; Incident Response) roles.</p>
+    </div>
+
+  </div>
+
+  <!-- JS -->
+  <script src="/assets/js/data.js"></script>
+  <script src="/assets/js/theme.js"></script>
+  <script src="/assets/js/components.js"></script>
+  <script src="/assets/js/progress.js"></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      document.body.prepend(renderNav());
+      document.body.appendChild(renderFooter());
+      const btnContainer = document.getElementById('progressBtn');
+      if (btnContainer) btnContainer.appendChild(renderProgressButton('keylogger-detector'));
+      initCopyButtons();
+    });
+  </script>
+</body>
+</html>

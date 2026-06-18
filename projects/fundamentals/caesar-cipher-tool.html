@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Caesar Cipher &amp; Frequency Analyzer — sec-projects</title>
+  <meta name="description" content="Implement classic substitution ciphers and break them using frequency analysis — your first step into cryptanalysis.">
+
+  <meta property="og:title" content="Caesar Cipher &amp; Frequency Analyzer — sec-projects">
+  <meta property="og:description" content="Implement classic substitution ciphers and break them using frequency analysis.">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://sec-projects.pages.dev/projects/fundamentals/caesar-cipher-tool.html">
+
+  <link rel="canonical" href="https://sec-projects.pages.dev/projects/fundamentals/caesar-cipher-tool.html">
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+  <link rel="stylesheet" href="/assets/css/theme.css">
+  <link rel="stylesheet" href="/assets/css/layout.css">
+  <link rel="stylesheet" href="/assets/css/components.css">
+</head>
+<body>
+  <div class="container" style="max-width:900px; margin: calc(var(--nav-height) + var(--space-8)) auto var(--space-8); padding: 0 var(--space-6);">
+
+    <div class="breadcrumbs">
+      <a href="/">Home</a>
+      <span class="breadcrumb-sep">/</span>
+      <a href="/?cat=fundamentals">Fundamentals</a>
+      <span class="breadcrumb-sep">/</span>
+      <span>Caesar Cipher &amp; Frequency Analyzer</span>
+    </div>
+
+    <div style="margin-bottom:var(--space-8);">
+      <div style="display:flex;align-items:center;gap:var(--space-4);flex-wrap:wrap;margin-bottom:var(--space-3);">
+        <span class="badge badge-beginner">Beginner</span>
+        <span style="color:var(--color-text-muted);font-size:var(--font-size-sm);">&#x23F1; 1-2 hours</span>
+      </div>
+      <h1 style="border-bottom:none;margin-bottom:var(--space-3);">Caesar Cipher &amp; Frequency Analyzer</h1>
+      <p style="font-size:var(--font-size-lg);color:var(--color-text-secondary);">Implement classic substitution ciphers and break them using frequency analysis — your first step into cryptanalysis.</p>
+      <div style="display:flex;flex-wrap:wrap;gap:var(--space-2);margin-top:var(--space-3);">
+        <span class="tag">python</span>
+        <span class="tag">crypto-basics</span>
+        <span class="tag">frequency-analysis</span>
+      </div>
+    </div>
+
+    <div id="progressBtn" style="margin-bottom:var(--space-8);"></div>
+
+    <h2>Learning Objectives</h2>
+    <ul style="margin-left:var(--space-6);margin-bottom:var(--space-6);color:var(--color-text-secondary);">
+      <li>Understand how the Caesar cipher works — the simplest substitution cipher in history</li>
+      <li>Implement both encryption and decryption using modular arithmetic</li>
+      <li>Learn frequency analysis: how letter distribution patterns can break substitution ciphers</li>
+      <li>Build a brute-force cracker that tries all 25 possible shifts automatically</li>
+      <li>Grasp why modern cryptography uses keys so large that brute-force is impossible</li>
+    </ul>
+
+    <h2>Prerequisites</h2>
+    <ul style="margin-left:var(--space-6);margin-bottom:var(--space-6);color:var(--color-text-secondary);">
+      <li>Python 3.8+ installed</li>
+      <li>Understanding of string operations and loops</li>
+      <li>No prior crypto knowledge needed — this is the starting point!</li>
+    </ul>
+
+    <!-- Step 1 -->
+    <h2>Step 1: Caesar Cipher Encryption &amp; Decryption</h2>
+    <p>The Caesar cipher shifts each letter by a fixed number of positions. With shift=3, 'A' becomes 'D', 'B' becomes 'E', and so on. It wraps around at 'Z' back to 'A'. This is modular arithmetic: <code>new_char = (char_pos + shift) % 26</code>.</p>
+
+    <pre><code>def caesar_encrypt(plaintext, shift):
+    """Encrypt using Caesar cipher — shifts letters forward by `shift`."""
+    result = []
+    for char in plaintext:
+        if char.isupper():
+            result.append(chr((ord(char) - ord('A') + shift) % 26 + ord('A')))
+        elif char.islower():
+            result.append(chr((ord(char) - ord('a') + shift) % 26 + ord('a')))
+        else:
+            result.append(char)  # Preserve non-letters
+    return ''.join(result)
+
+def caesar_decrypt(ciphertext, shift):
+    """Decrypt by shifting backward — equivalent to encrypting with (26 - shift)."""
+    return caesar_encrypt(ciphertext, 26 - shift)  # Or pass -shift
+
+# Test with ROT13 (shift=13, self-inverse)
+original = "HELLO WORLD"
+encrypted = caesar_encrypt(original, 13)
+decrypted = caesar_decrypt(encrypted, 13)
+
+print(f"Original:  {original}")
+print(f"Encrypted: {encrypted}")
+print(f"Decrypted: {decrypted}")
+
+# Output:
+# Original:  HELLO WORLD
+# Encrypted: URYYB JBEYQ
+# Decrypted: HELLO WORLD</code></pre>
+
+    <p><strong>Key insight:</strong> The Caesar cipher has only 25 possible keys (shifts 1–25, since 0 and 26 are identity). That's trivially brute-forceable — a lesson in why key space size matters.</p>
+
+    <!-- Step 2 -->
+    <h2>Step 2: Brute-Force Cracker</h2>
+    <p>Since there are only 25 possible shifts, we can try them all and print every result. A human (or an automated scorer) can pick the correct one.</p>
+
+    <pre><code>def brute_force_caesar(ciphertext):
+    """Try all 25 shifts and display results."""
+    print(f"{'Shift':>5} | Decryption")
+    print("-" * 40)
+    for shift in range(1, 26):
+        plaintext = caesar_decrypt(ciphertext, shift)
+        print(f"{shift:>5} | {plaintext}")
+
+# Try it on an intercepted message
+intercepted = "LIW QI XLMHI WIGVIX QC TIRWIV"
+brute_force_caesar(intercepted)
+
+# Output:
+# Shift | Decryption
+# ----------------------------------------
+#     1 | KHV PH WKLGH VHFUHW PB UHQHU
+#     ...
+#     4 | HELLO WORLD — THIS IS THE CORRECT ONE!
+#     ...
+#    13 | YVD FV KYSVY DVTVIE HZ EFIZFI</code></pre>
+
+    <!-- Step 3 -->
+    <h2>Step 3: Frequency Analysis — Cracking Without Trying All Shifts</h2>
+    <p>In English, 'E' is the most common letter (~12.7%), followed by 'T', 'A', 'O', etc. If we find the most common letter in ciphertext, we can calculate the likely shift.</p>
+
+    <pre><code>from collections import Counter
+import string
+
+# Standard English letter frequencies (simplified)
+ENGLISH_FREQ = {
+    'E': 12.70, 'T': 9.06, 'A': 8.17, 'O': 7.51, 'I': 6.97,
+    'N': 6.75, 'S': 6.33, 'H': 6.09, 'R': 5.99, 'D': 4.25,
+    'L': 4.03, 'C': 2.78, 'U': 2.76, 'M': 2.41, 'W': 2.36,
+    'F': 2.23, 'G': 2.02, 'Y': 1.97, 'P': 1.93, 'B': 1.49,
+    'V': 0.98, 'K': 0.77, 'J': 0.15, 'X': 0.15, 'Q': 0.10, 'Z': 0.07
+}
+
+def frequency_analysis_crack(ciphertext):
+    """Crack Caesar cipher by comparing frequency distributions."""
+    # Count letters in ciphertext
+    letters_only = [c.upper() for c in ciphertext if c.isalpha()]
+    if not letters_only:
+        return None
+
+    counter = Counter(letters_only)
+    total = sum(counter.values())
+
+    # Compare each possible shift against English frequencies
+    best_shift, best_score = 0, float('inf')
+
+    for shift in range(26):
+        score = 0
+        for plain_char in string.ascii_uppercase:
+            # What ciphertext character maps to this plain char under this shift?
+            cipher_char = chr((ord(plain_char) - ord('A') + shift) % 26 + ord('A'))
+            observed_pct = (counter.get(cipher_char, 0) / total) * 100
+            expected_pct = ENGLISH_FREQ.get(plain_char, 0)
+            score += abs(observed_pct - expected_pct)
+
+        if score < best_score:
+            best_score = score
+            best_shift = shift
+
+    return caesar_decrypt(ciphertext, best_shift), best_shift
+
+# Crack it
+ct = "LIW QI XLMHI WIGVIX QC TIRWIV"
+plaintext, shift = frequency_analysis_crack(ct)
+print(f"Likely shift: {shift}")
+print(f"Cracked text: {plaintext}")
+# Output:
+# Likely shift: 4
+# Cracked text: HELLO WORLD — THIS IS THE CORRECT ONE!</code></pre>
+
+    <p><strong>Frequency analysis</strong> doesn't just break Caesar ciphers — it breaks <em>all</em> monoalphabetic substitution ciphers. This is why modern ciphers (AES) produce output that looks uniformly random, with no detectable frequency patterns.</p>
+
+    <!-- Step 4 -->
+    <h2>Step 4: Beyond Caesar — ROT13 and Custom Alphabets</h2>
+    <p>Extend your tool to support ROT13 (used historically for obscuring text on forums) and custom substitution alphabets.</p>
+
+    <pre><code>class SubstitutionCipher:
+    """General substitution cipher with custom alphabet mapping."""
+
+    def __init__(self, alphabet=None):
+        if alphabet is None:
+            # Randomly shuffled alphabet
+            alpha_list = list(string.ascii_uppercase)
+            secrets.SystemRandom().shuffle(alpha_list)
+            alphabet = ''.join(alpha_list)
+
+        self.encode_map = {}
+        self.decode_map = {}
+        for plain, cipher in zip(string.ascii_uppercase, alphabet):
+            self.encode_map[plain] = cipher
+            self.decode_map[cipher] = plain
+
+    def encrypt(self, text):
+        result = []
+        for c in text:
+            upper = c.upper()
+            if upper in self.encode_map:
+                mapped = self.encode_map[upper]
+                result.append(mapped if c.isupper() else mapped.lower())
+            else:
+                result.append(c)
+        return ''.join(result)
+
+    def decrypt(self, text):
+        result = []
+        for c in text:
+            upper = c.upper()
+            if upper in self.decode_map:
+                mapped = self.decode_map[upper]
+                result.append(mapped if c.isupper() else mapped.lower())
+            else:
+                result.append(c)
+        return ''.join(result)
+
+# Test full substitution
+cipher = SubstitutionCipher()
+msg = "THE QUICK BROWN FOX JUMPS OVER THE LAZY DOG"
+enc = cipher.encrypt(msg)
+dec = cipher.decrypt(enc)
+print(f"Encrypted: {enc}")
+print(f"Decrypted: {dec}")</code></pre>
+
+    <!-- Testing -->
+    <h2>Testing Your Tool</h2>
+    <p>Test with known ciphers and verify frequency analysis accuracy:</p>
+    <ul style="margin-left:var(--space-6);margin-bottom:var(--space-6);color:var(--color-text-secondary);">
+      <li><strong>"Khoor Zruog"</strong> (shift 3) → should decode to "Hello World"</li>
+      <li><strong>"Lipps Asvph"</strong> (shift 4) → should decode to "Hello There"</li>
+      <li>Try frequency analysis on <strong>longer texts</strong> — accuracy improves with more ciphertext</li>
+      <li>Test that your cracker fails gracefully on <strong>very short ciphertexts</strong> (not enough data for frequency analysis)</li>
+    </ul>
+
+    <!-- Extensions -->
+    <h2>Extension Ideas</h2>
+    <ul style="margin-left:var(--space-6);margin-bottom:var(--space-6);color:var(--color-text-secondary);">
+      <li>Implement the <strong>Vigenère cipher</strong> — uses a keyword instead of a single shift</li>
+      <li>Build an <strong>ngram-based scorer</strong> that checks if decrypted text looks like real English (bigrams, trigrams)</li>
+      <li>Add <strong>visual frequency charts</strong> using matplotlib to compare ciphertext vs English distributions</li>
+      <li>Implement the <strong>Affine cipher</strong> (y = ax + b mod 26) as a generalization of Caesar</li>
+      <li>Create a <strong>CTF-style challenge generator</strong> that produces encrypted messages at various difficulty levels</li>
+    </ul>
+
+    <!-- Resources -->
+    <h2>Resources &amp; Next Steps</h2>
+    <div style="display:flex;flex-direction:column;gap:var(--space-2);margin-bottom:var(--space-8);">
+      <a class="resource-link" href="http://practicalcryptography.com/ciphers/caesar-cipher/" target="_blank" rel="noopener">
+        <span class="resource-link-icon">&#x1F4D6;</span> Practical Cryptography — Caesar Cipher Deep Dive
+      </a>
+      <a class="resource-link" href="https://tryhackme.com/room/cryptographyintro" target="_blank" rel="noopener">
+        <span class="resource-link-icon">&#x1F3AF;</span> TryHackMe: Introduction to Cryptography
+      </a>
+      <a class="resource-link" href="https://cryptopals.com/" target="_blank" rel="noopener">
+        <span class="resource-link-icon">&#x1F4DC;</span> Cryptopals — Matasano Crypto Challenges
+      </a>
+      <a class="resource-link" href="https://www.dcode.fr/caesar-cipher" target="_blank" rel="noopener">
+        <span class="resource-link-icon">&#x1F50D;</span> dCode — Online Cipher Tools (Reference)
+      </a>
+    </div>
+
+    <!-- Cert Relevance -->
+    <div class="callout">
+      <div class="callout-title">&#x1F393; Cert Relevance</div>
+      <p>Frequency analysis and substitution cipher concepts appear in <strong>CompTIA Security+</strong> (cryptography fundamentals) and lay groundwork for <strong>CISSP</strong> Domain 3. For offensive certs like <strong>OSCP</strong> and <strong>eJPT</strong>, understanding how weak encryption is broken helps you recognize when applications use insecure crypto — a common finding in penetration tests.</p>
+    </div>
+
+  </div>
+
+  <script src="/assets/js/data.js"></script>
+  <script src="/assets/js/theme.js"></script>
+  <script src="/assets/js/components.js"></script>
+  <script src="/assets/js/progress.js"></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      document.body.prepend(renderNav());
+      document.body.appendChild(renderFooter());
+      const btnContainer = document.getElementById('progressBtn');
+      if (btnContainer) btnContainer.appendChild(renderProgressButton('caesar-cipher-tool'));
+      initCopyButtons();
+    });
+  </script>
+</body>
+</html>

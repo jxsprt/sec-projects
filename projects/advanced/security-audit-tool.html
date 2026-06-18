@@ -1,0 +1,674 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Automated Security Audit Tool — sec-projects</title>
+  <meta name="description" content="Scan a Linux system for security misconfigurations — file permissions, open ports, outdated packages, weak SSH config — and generate an audit report.">
+
+  <meta property="og:title" content="Automated Security Audit Tool — sec-projects">
+  <meta property="og:description" content="Scan Linux systems for security misconfigurations and generate an audit report.">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://sec-projects.pages.dev/projects/advanced/security-audit-tool.html">
+
+  <link rel="canonical" href="https://sec-projects.pages.dev/projects/advanced/security-audit-tool.html">
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+  <link rel="stylesheet" href="/assets/css/theme.css">
+  <link rel="stylesheet" href="/assets/css/layout.css">
+  <link rel="stylesheet" href="/assets/css/components.css">
+</head>
+<body>
+  <div class="container" style="max-width:900px; margin: calc(var(--nav-height) + var(--space-8)) auto var(--space-8); padding: 0 var(--space-6);">
+
+    <!-- Breadcrumbs -->
+    <div class="breadcrumbs">
+      <a href="/">Home</a>
+      <span class="breadcrumb-sep">/</span>
+      <a href="/?cat=advanced">Advanced</a>
+      <span class="breadcrumb-sep">/</span>
+      <span>Automated Security Audit Tool</span>
+    </div>
+
+    <!-- Header -->
+    <div style="margin-bottom:var(--space-8);">
+      <div style="display:flex;align-items:center;gap:var(--space-4);flex-wrap:wrap;margin-bottom:var(--space-3);">
+        <span class="badge badge-advanced">Advanced</span>
+        <span style="color:var(--color-text-muted);font-size:var(--font-size-sm);">&#x23F1; 5-7 hours</span>
+      </div>
+      <h1 style="border-bottom:none;margin-bottom:var(--space-3);">Automated Security Audit Tool</h1>
+      <p style="font-size:var(--font-size-lg);color:var(--color-text-secondary);">Scan a Linux system for security misconfigurations — file permissions, open ports, outdated packages, weak SSH config — and generate an audit report.</p>
+      <div style="display:flex;flex-wrap:wrap;gap:var(--space-2);margin-top:var(--space-3);">
+        <span class="tag">python</span>
+        <span class="tag">linux</span>
+        <span class="tag">hardening</span>
+        <span class="tag">compliance</span>
+      </div>
+    </div>
+
+    <!-- Progress Button -->
+    <div id="progressBtn" style="margin-bottom:var(--space-8);"></div>
+
+    <div class="callout">
+      <div class="callout-title">&#x26A0; Authorization Required</div>
+      <p>Only run this tool on systems you own or have explicit written authorization to audit. Running security scans on unauthorized systems may be illegal and can trigger intrusion detection alerts.</p>
+    </div>
+
+    <!-- Learning Objectives -->
+    <h2>Learning Objectives</h2>
+    <ul style="margin-left:var(--space-6);margin-bottom:var(--space-6);color:var(--color-text-secondary);">
+      <li>Understand system hardening principles and the CIS Benchmarks framework</li>
+      <li>Automate security checks that auditors normally perform manually</li>
+      <li>Work with Linux security primitives: file permissions, SUID bits, capabilities</li>
+      <li>Generate professional audit reports with risk-based findings and remediation advice</li>
+      <li>Learn the methodology behind tools like Lynis, OpenSCAP, and commercial vulnerability scanners</li>
+    </ul>
+
+    <!-- Prerequisites -->
+    <h2>Prerequisites</h2>
+    <ul style="margin-left:var(--space-6);margin-bottom:var(--space-6);color:var(--color-text-secondary);">
+      <li>Python 3.8+ running on a Linux system (Ubuntu/Debian recommended)</li>
+      <li>Root or sudo access (many checks require reading restricted files)</li>
+      <li>Familiarity with Linux command line and common system paths</li>
+      <li>Basic understanding of security hardening concepts</li>
+    </ul>
+
+    <!-- Step 1 -->
+    <h2>Step 1: System Information Gathering</h2>
+    <p>Collect baseline system information — the foundation of any security audit. This tells you what you're auditing before you start looking for problems.</p>
+
+    <pre><code>import platform
+import os
+import subprocess
+import pwd
+import grp
+from datetime import datetime
+
+class SystemInfo:
+    """Gather baseline system information."""
+
+    @staticmethod
+    def collect() -> dict:
+        return {
+            "hostname": platform.node(),
+            "os": f"{platform.system()} {platform.release()}",
+            "kernel": platform.version(),
+            "architecture": platform.machine(),
+            "uptime": SystemInfo._get_uptime(),
+            "current_user": os.getenv("USER") or os.getenv("SUDO_USER", "unknown"),
+            "is_root": os.geteuid() == 0,
+            "audit_time": datetime.now().isoformat(),
+        }
+
+    @staticmethod
+    def _get_uptime() -> str:
+        """Parse /proc/uptime to get system uptime."""
+        try:
+            with open("/proc/uptime") as f:
+                uptime_seconds = float(f.readline().split()[0])
+            days = int(uptime_seconds // 86400)
+            hours = int((uptime_seconds % 86400) // 3600)
+            return f"{days}d {hours}h"
+        except:
+            return "unknown"
+
+# Collect system info
+info = SystemInfo.collect()
+for key, value in info.items():
+    print(f"  {key:20s}: {value}")
+
+if not info["is_root"]:
+    print("\n⚠️  WARNING: Not running as root. Some checks will be limited.")</code></pre>
+
+    <!-- Step 2 -->
+    <h2>Step 2: File Permission Auditing</h2>
+    <p>Check critical system files for dangerous permissions. World-writable files, unowned files, and SUID/SGID binaries are common privilege escalation vectors.</p>
+
+    <pre><code>import os
+import stat
+from pathlib import Path
+
+class FileAuditor:
+    """Audit file permissions and ownership for security issues."""
+
+    CRITICAL_PATHS = {
+        "/etc/shadow":    {"expected_perm": 0o640, "expected_owner": "root"},
+        "/etc/passwd":    {"expected_perm": 0o644, "expected_owner": "root"},
+        "/etc/group":     {"expected_perm": 0o644, "expected_owner": "root"},
+        "/etc/sudoers":   {"expected_perm": 0o440, "expected_owner": "root"},
+        "/etc/ssh/sshd_config": {"expected_perm": 0o600, "expected_owner": "root"},
+        "/etc/hosts.allow":     {"expected_perm": 0o644, "expected_owner": "root"},
+        "/etc/hosts.deny":      {"expected_perm": 0o644, "expected_owner": "root"},
+    }
+
+    def __init__(self):
+        self.findings = []
+
+    def check_critical_files(self):
+        """Audit critical system files for correct permissions and ownership."""
+        for path, expected in self.CRITICAL_PATHS.items():
+            if not os.path.exists(path):
+                self.findings.append({
+                    "severity": "INFO",
+                    "check": f"File exists: {path}",
+                    "detail": "File does not exist",
+                    "remediation": "Verify if this file should exist"
+                })
+                continue
+
+            st = os.stat(path)
+            actual_perm = stat.S_IMODE(st.st_mode)
+
+            if actual_perm != expected["expected_perm"]:
+                self.findings.append({
+                    "severity": "HIGH",
+                    "check": f"Permissions: {path}",
+                    "detail": f"Permissions are {oct(actual_perm)}, expected {oct(expected['expected_perm'])}",
+                    "remediation": f"chmod {oct(expected['expected_perm'])[2:]} {path}"
+                })
+
+            try:
+                owner = pwd.getpwuid(st.st_uid).pw_name
+                if owner != expected["expected_owner"]:
+                    self.findings.append({
+                        "severity": "CRITICAL",
+                        "check": f"Owner: {path}",
+                        "detail": f"Owned by '{owner}', expected '{expected['expected_owner']}'",
+                        "remediation": f"chown {expected['expected_owner']} {path}"
+                    })
+            except KeyError:
+                self.findings.append({
+                    "severity": "HIGH",
+                    "check": f"Owner: {path}",
+                    "detail": f"No user with UID {st.st_uid}",
+                    "remediation": f"Assign proper ownership to {path}"
+                })
+
+    def find_world_writable(self, search_path: str = "/etc", max_files: int = 500):
+        """Find world-writable files in a directory."""
+        count = 0
+        for root, dirs, files in os.walk(search_path):
+            for name in files:
+                if count >= max_files:
+                    return
+                full_path = os.path.join(root, name)
+                try:
+                    st = os.stat(full_path)
+                    if st.st_mode & stat.S_IWOTH:  # World-writable bit
+                        self.findings.append({
+                            "severity": "MEDIUM",
+                            "check": f"World-writable: {full_path}",
+                            "detail": "File is writable by any user",
+                            "remediation": f"chmod o-w {full_path}"
+                        })
+                        count += 1
+                except (PermissionError, FileNotFoundError):
+                    continue
+
+    def find_suid_binaries(self, search_paths: list = None):
+        """Find SUID/SGID binaries (potential privilege escalation targets)."""
+        if search_paths is None:
+            search_paths = ["/usr/bin", "/usr/sbin", "/bin", "/sbin"]
+
+        for path in search_paths:
+            if not os.path.isdir(path):
+                continue
+            for root, dirs, files in os.walk(path):
+                for name in files:
+                    full_path = os.path.join(root, name)
+                    try:
+                        st = os.stat(full_path)
+                        if st.st_mode & (stat.S_ISUID | stat.S_ISGID):
+                            self.findings.append({
+                                "severity": "INFO",
+                                "check": f"SUID/SGID: {full_path}",
+                                "detail": f"SUID={bool(st.st_mode & stat.S_ISUID)} SGID={bool(st.st_mode & stat.S_ISGID)}",
+                                "remediation": "Review if SUID/SGID is necessary"
+                            })
+                    except (PermissionError, FileNotFoundError):
+                        continue
+
+# Run audit
+auditor = FileAuditor()
+auditor.check_critical_files()
+auditor.find_world_writable()
+auditor.find_suid_binaries()
+
+for finding in auditor.findings:
+    print(f"[{finding['severity']:8s}] {finding['check']}")
+    print(f"             → {finding['detail']}")
+    print(f"             → Fix: {finding['remediation']}\n")</code></pre>
+
+    <!-- Step 3 -->
+    <h2>Step 3: SSH Configuration Audit</h2>
+    <p>SSH is one of the most attacked services. Check for weak configurations: root login, password auth, weak ciphers, deprecated key exchange algorithms.</p>
+
+    <pre><code>import re
+
+class SSHAuditor:
+    """Audit SSH server configuration for security best practices."""
+
+    SSH_CONFIG = "/etc/ssh/sshd_config"
+
+    SECURITY_CHECKS = {
+        # (config_key, recommended_value, severity_if_mismatch)
+        "PermitRootLogin":     ("no", "CRITICAL"),
+        "PasswordAuthentication": ("no", "HIGH"),
+        "PermitEmptyPasswords":   ("no", "CRITICAL"),
+        "X11Forwarding":          ("no", "MEDIUM"),
+        "MaxAuthTries":           ("3", "MEDIUM"),
+        "ClientAliveInterval":    ("300", "LOW"),
+        "ClientAliveCountMax":    ("3", "LOW"),
+        "Protocol":               ("2", "CRITICAL"),
+        "AllowTcpForwarding":     ("no", "MEDIUM"),
+        "AllowAgentForwarding":   ("no", "MEDIUM"),
+    }
+
+    WEAK_CIPHERS = [
+        "cbc", "arcfour", "3des", "blowfish", "cast128", "none"
+    ]
+
+    WEAK_MACS = [
+        "md5", "sha1", "96", "ripemd"
+    ]
+
+    def __init__(self):
+        self.findings = []
+        self.config = {}
+
+    def parse_config(self, config_path: str = None):
+        """Parse sshd_config file."""
+        path = config_path or self.SSH_CONFIG
+        try:
+            with open(path) as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith("#"):
+                        if " " in line:
+                            key, value = line.split(None, 1)
+                            self.config[key] = value.strip().lower()
+        except FileNotFoundError:
+            self.findings.append({
+                "severity": "INFO",
+                "check": "SSH config exists",
+                "detail": f"{path} not found — SSH server may not be installed",
+                "remediation": "Install openssh-server if SSH is needed"
+            })
+
+    def check_hardening(self):
+        """Check SSH configuration against security best practices."""
+        for key, (recommended, severity) in self.SECURITY_CHECKS.items():
+            actual = self.config.get(key.lower(), "not set").lower()
+            if actual != recommended:
+                self.findings.append({
+                    "severity": severity,
+                    "check": f"SSH: {key}",
+                    "detail": f"Current: '{actual}', Recommended: '{recommended}'",
+                    "remediation": f"Set '{key} {recommended}' in {self.SSH_CONFIG}"
+                })
+
+    def check_ciphers(self):
+        """Check for weak SSH ciphers (requires sshd -T or ssh -Q)."""
+        try:
+            result = subprocess.run(
+                ["sshd", "-T"], capture_output=True, text=True, timeout=5
+            )
+            for line in result.stdout.splitlines():
+                if line.lower().startswith("ciphers"):
+                    ciphers = line.split(None, 1)[1].lower()
+                    for weak in self.WEAK_CIPHERS:
+                        if weak in ciphers:
+                            self.findings.append({
+                                "severity": "HIGH",
+                                "check": "SSH: Weak Cipher",
+                                "detail": f"Cipher '{weak}' is enabled",
+                                "remediation": "Remove weak ciphers from Ciphers directive"
+                            })
+                    break
+        except:
+            pass  # sshd not installed or unavailable
+
+# Run SSH audit
+ssh = SSHAuditor()
+ssh.parse_config()
+ssh.check_hardening()
+ssh.check_ciphers()
+
+for finding in ssh.findings:
+    print(f"[{finding['severity']:8s}] {finding['check']}")
+    print(f"             → {finding['detail']}")
+    print(f"             → Fix: {finding['remediation']}\n")</code></pre>
+
+    <!-- Step 4 -->
+    <h2>Step 4: Package &amp; Port Audit</h2>
+    <p>Check for outdated packages with known vulnerabilities and audit open network ports with listening services.</p>
+
+    <pre><code>import subprocess
+import socket
+import json
+from datetime import datetime, timedelta
+
+class PackageAuditor:
+    """Audit installed packages for outdated or vulnerable versions."""
+
+    def __init__(self):
+        self.findings = []
+        self._detect_package_manager()
+
+    def _detect_package_manager(self):
+        """Detect which package manager is available."""
+        for pm in ["apt", "dnf", "yum", "pacman", "zypper"]:
+            if subprocess.run(["which", pm], capture_output=True).returncode == 0:
+                self.pkg_manager = pm
+                return
+        self.pkg_manager = None
+
+    def check_updates(self):
+        """Check for available security updates."""
+        if self.pkg_manager == "apt":
+            try:
+                # Check for available updates
+                subprocess.run(["apt", "update"], capture_output=True, timeout=30)
+                result = subprocess.run(
+                    ["apt", "list", "--upgradable"],
+                    capture_output=True, text=True, timeout=10
+                )
+                upgradable = [line for line in result.stdout.splitlines()
+                             if "/" in line and "Listing" not in line]
+
+                if upgradable:
+                    security_updates = [u for u in upgradable if "security" in u.lower()]
+                    self.findings.append({
+                        "severity": "HIGH" if security_updates else "MEDIUM",
+                        "check": "Package Updates",
+                        "detail": f"{len(upgradable)} packages need updating "
+                                  f"({len(security_updates)} are security updates)",
+                        "remediation": "sudo apt upgrade"
+                    })
+            except:
+                pass
+
+    def check_critical_packages(self):
+        """Verify critical security packages are installed."""
+        critical = {
+            "ufw": "Firewall",
+            "fail2ban": "Intrusion prevention",
+            "auditd": "Audit daemon",
+            "aide": "File integrity monitoring",
+            "rkhunter": "Rootkit detection",
+        }
+
+        for pkg, purpose in critical.items():
+            result = subprocess.run(
+                ["which", pkg], capture_output=True
+            )
+            if result.returncode != 0:
+                self.findings.append({
+                    "severity": "MEDIUM",
+                    "check": f"Missing: {pkg}",
+                    "detail": f"{purpose} is not installed",
+                    "remediation": f"sudo apt install {pkg}"
+                })
+
+
+class PortAuditor:
+    """Audit listening ports and associated services."""
+
+    DANGEROUS_SERVICES = ["telnet", "ftp", "rsh", "rlogin", "rexec", "tftp"]
+
+    def __init__(self):
+        self.findings = []
+
+    def scan_listening_ports(self):
+        """Use ss (socket statistics) to list listening ports."""
+        try:
+            result = subprocess.run(
+                ["ss", "-tlnp"], capture_output=True, text=True, timeout=5
+            )
+            listening = []
+            for line in result.stdout.splitlines()[1:]:  # Skip header
+                if line.strip():
+                    listening.append(line.strip())
+
+            if not listening:
+                return
+
+            for entry in listening:
+                parts = entry.split()
+                if len(parts) >= 4:
+                    local_addr = parts[3]
+                    process = parts[-1] if len(parts) >= 6 else "unknown"
+
+                    # Extract port number
+                    port = local_addr.split(":")[-1]
+
+                    # Check for dangerous services
+                    for svc in self.DANGEROUS_SERVICES:
+                        if svc in process.lower():
+                            self.findings.append({
+                                "severity": "CRITICAL",
+                                "check": f"Dangerous service: {svc}",
+                                "detail": f"Listening on port {port} — {process}",
+                                "remediation": f"Disable {svc} and use SSH/HTTPS instead"
+                            })
+
+            # Report all listening ports
+            self.findings.append({
+                "severity": "INFO",
+                "check": "Listening Ports",
+                "detail": f"{len(listening)} listening services:\n  " + "\n  ".join(listening),
+                "remediation": "Review and close unnecessary ports with firewall"
+            })
+
+        except Exception as e:
+            self.findings.append({
+                "severity": "INFO",
+                "check": "Port scan",
+                "detail": f"Could not scan ports: {e}",
+                "remediation": "Ensure 'ss' or 'netstat' is installed"
+            })
+
+# Run audits
+pkg = PackageAuditor()
+pkg.check_updates()
+pkg.check_critical_packages()
+
+port = PortAuditor()
+port.scan_listening_ports()
+
+for finding in pkg.findings + port.findings:
+    print(f"[{finding['severity']:8s}] {finding['check']}")
+    print(f"             → {finding['detail']}")
+    print(f"             → Fix: {finding['remediation']}\n")</code></pre>
+
+    <!-- Step 5 -->
+    <h2>Step 5: Report Generation &amp; Scoring</h2>
+    <p>Compile all findings into a structured audit report with severity scoring. Export as terminal output, HTML, and JSON.</p>
+
+    <pre><code>import json
+from datetime import datetime
+
+class AuditReport:
+    """Compile all audit findings into a structured report."""
+
+    SEVERITY_ORDER = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, "INFO": 4}
+    SEVERITY_SCORE = {"CRITICAL": 10, "HIGH": 7, "MEDIUM": 4, "LOW": 2, "INFO": 0}
+
+    def __init__(self, system_info: dict):
+        self.system_info = system_info
+        self.findings = []
+        self.total_score_penalty = 0
+        self.max_score = 100
+
+    def add_findings(self, findings: list):
+        """Add audit findings from any auditor module."""
+        self.findings.extend(findings)
+        for f in findings:
+            self.total_score_penalty += self.SEVERITY_SCORE.get(f["severity"], 0)
+
+    @property
+    def score(self) -> int:
+        return max(0, self.max_score - self.total_score_penalty)
+
+    def get_grade(self) -> str:
+        if self.score >= 90: return "A"
+        elif self.score >= 75: return "B"
+        elif self.score >= 60: return "C"
+        elif self.score >= 40: return "D"
+        else: return "F"
+
+    def generate_text(self) -> str:
+        """Generate a human-readable text report."""
+        lines = []
+        lines.append("=" * 70)
+        lines.append("  SECURITY AUDIT REPORT")
+        lines.append("=" * 70)
+        lines.append(f"  Host:     {self.system_info['hostname']}")
+        lines.append(f"  OS:       {self.system_info['os']}")
+        lines.append(f"  Date:     {self.system_info['audit_time']}")
+        lines.append(f"  Score:    {self.score}/100 (Grade: {self.get_grade()})")
+        lines.append("")
+
+        # Summary by severity
+        severity_counts = {}
+        for f in self.findings:
+            sev = f["severity"]
+            severity_counts[sev] = severity_counts.get(sev, 0) + 1
+
+        lines.append("  Findings Summary:")
+        for sev in ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"]:
+            if sev in severity_counts:
+                lines.append(f"    {sev:10s}: {severity_counts[sev]}")
+
+        lines.append("")
+        lines.append("-" * 70)
+
+        # Detail
+        for sev in ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"]:
+            sev_findings = [f for f in self.findings if f["severity"] == sev]
+            if sev_findings:
+                lines.append(f"\n  [{sev}]")
+                for f in sev_findings:
+                    lines.append(f"    • {f['check']}")
+                    lines.append(f"      → {f['detail']}")
+                    lines.append(f"      → Remediation: {f['remediation']}")
+
+        lines.append("\n" + "=" * 70)
+        lines.append("  END OF REPORT")
+        lines.append("=" * 70)
+
+        return "\n".join(lines)
+
+    def generate_json(self) -> str:
+        """Generate a machine-readable JSON report."""
+        return json.dumps({
+            "metadata": self.system_info,
+            "score": self.score,
+            "grade": self.get_grade(),
+            "findings": self.findings
+        }, indent=2)
+
+    def save(self, text_path: str = "audit_report.txt",
+             json_path: str = "audit_report.json"):
+        """Save reports to files."""
+        with open(text_path, "w") as f:
+            f.write(self.generate_text())
+        print(f"Text report saved to {text_path}")
+
+        with open(json_path, "w") as f:
+            f.write(self.generate_json())
+        print(f"JSON report saved to {json_path}")
+
+# Assemble the full report
+info = SystemInfo.collect()
+report = AuditReport(info)
+
+# Run all auditors
+file_auditor = FileAuditor()
+file_auditor.check_critical_files()
+file_auditor.find_world_writable()
+report.add_findings(file_auditor.findings)
+
+ssh_auditor = SSHAuditor()
+ssh_auditor.parse_config()
+ssh_auditor.check_hardening()
+report.add_findings(ssh_auditor.findings)
+
+pkg_auditor = PackageAuditor()
+pkg_auditor.check_updates()
+pkg_auditor.check_critical_packages()
+report.add_findings(pkg_auditor.findings)
+
+port_auditor = PortAuditor()
+port_auditor.scan_listening_ports()
+report.add_findings(port_auditor.findings)
+
+# Generate report
+print(report.generate_text())
+report.save()</code></pre>
+
+    <!-- Testing -->
+    <h2>Testing Your Audit Tool</h2>
+    <p>Verify the audit tool on different configurations:</p>
+    <ul style="margin-left:var(--space-6);margin-bottom:var(--space-6);color:var(--color-text-secondary);">
+      <li><strong>Clean system:</strong> Run on a freshly installed VM — should score 85+</li>
+      <li><strong>Intentionally broken:</strong> Create a deliberately misconfigured VM (open permissions, weak SSH) and verify it catches every issue</li>
+      <li><strong>Compare with Lynis:</strong> Run <code>lynis audit system</code> on the same host and compare findings</li>
+      <li><strong>Docker test:</strong> Audit inside a container — should correctly detect the constrained environment</li>
+      <li><strong>Non-root test:</strong> Run without sudo — verify it gracefully handles permission errors</li>
+    </ul>
+
+    <!-- Extensions -->
+    <h2>Extension Ideas</h2>
+    <ul style="margin-left:var(--space-6);margin-bottom:var(--space-6);color:var(--color-text-secondary);">
+      <li><strong>CIS Benchmark compliance:</strong> Implement full checks against a specific CIS Benchmark profile (Ubuntu 22.04 Level 1)</li>
+      <li><strong>Remediation engine:</strong> Add an <code>--fix</code> flag that automatically applies safe remediations</li>
+      <li><strong>Remote auditing:</strong> Use SSH to audit remote servers — useful for fleet management</li>
+      <li><strong>HTML dashboard:</strong> Generate an interactive HTML report with charts, filtering, and trend tracking over time</li>
+      <li><strong>Kernel hardening checks:</strong> Audit sysctl security parameters (ASLR, kernel.kptr_restrict, etc.)</li>
+    </ul>
+
+    <!-- Resources -->
+    <h2>Resources &amp; Next Steps</h2>
+    <div style="display:flex;flex-direction:column;gap:var(--space-2);margin-bottom:var(--space-8);">
+      <a class="resource-link" href="https://www.cisecurity.org/cis-benchmarks/" target="_blank" rel="noopener">
+        <span class="resource-link-icon">&#x1F4D6;</span> CIS Benchmarks — Industry Standard Hardening Guides
+      </a>
+      <a class="resource-link" href="https://cisofy.com/lynis/" target="_blank" rel="noopener">
+        <span class="resource-link-icon">&#x1F50D;</span> Lynis — Reference Security Audit Tool
+      </a>
+      <a class="resource-link" href="https://wiki.archlinux.org/title/Security" target="_blank" rel="noopener">
+        <span class="resource-link-icon">&#x1F4D8;</span> Arch Linux Security Wiki (Excellent Hardening Reference)
+      </a>
+      <a class="resource-link" href="https://tryhackme.com/room/linuxstrengthtraining" target="_blank" rel="noopener">
+        <span class="resource-link-icon">&#x1F3AF;</span> TryHackMe: Linux Strength Training
+      </a>
+    </div>
+
+    <!-- Cert Relevance -->
+    <div class="callout">
+      <div class="callout-title">&#x1F393; Cert Relevance</div>
+      <p>This project directly maps to the <strong>CompTIA Security+</strong> domain on secure system design and hardening. The file permission and SUID auditing is a core skill for <strong>eJPT</strong> and <strong>OSCP</strong> privilege escalation. For blue teamers pursuing <strong>CySA+</strong> or <strong>CISSP</strong>, the audit methodology and report generation maps to security assessment and compliance auditing objectives. The automated approach mirrors what <strong>CASP+</strong> expects for enterprise security architecture.</p>
+    </div>
+
+  </div>
+
+  <!-- JS -->
+  <script src="/assets/js/data.js"></script>
+  <script src="/assets/js/theme.js"></script>
+  <script src="/assets/js/components.js"></script>
+  <script src="/assets/js/progress.js"></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      document.body.prepend(renderNav());
+      document.body.appendChild(renderFooter());
+      const btnContainer = document.getElementById('progressBtn');
+      if (btnContainer) btnContainer.appendChild(renderProgressButton('security-audit-tool'));
+      initCopyButtons();
+    });
+  </script>
+</body>
+</html>

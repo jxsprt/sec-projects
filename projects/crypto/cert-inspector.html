@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SSL/TLS Certificate Inspector — sec-projects</title>
+  <meta name="description" content="Fetch and analyze SSL/TLS certificates — check expiry, issuer chain, cipher suites, and security configuration.">
+
+  <meta property="og:title" content="SSL/TLS Certificate Inspector — sec-projects">
+  <meta property="og:description" content="Fetch and analyze SSL/TLS certificates — check expiry, issuer chain, cipher suites, and security.">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://sec-projects.pages.dev/projects/crypto/cert-inspector.html">
+
+  <link rel="canonical" href="https://sec-projects.pages.dev/projects/crypto/cert-inspector.html">
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+  <link rel="stylesheet" href="/assets/css/theme.css">
+  <link rel="stylesheet" href="/assets/css/layout.css">
+  <link rel="stylesheet" href="/assets/css/components.css">
+</head>
+<body>
+  <div class="container" style="max-width:900px; margin: calc(var(--nav-height) + var(--space-8)) auto var(--space-8); padding: 0 var(--space-6);">
+
+    <!-- Breadcrumbs -->
+    <div class="breadcrumbs">
+      <a href="/">Home</a>
+      <span class="breadcrumb-sep">/</span>
+      <a href="/?cat=crypto">Cryptography</a>
+      <span class="breadcrumb-sep">/</span>
+      <span>SSL/TLS Certificate Inspector</span>
+    </div>
+
+    <!-- Header -->
+    <div style="margin-bottom:var(--space-8);">
+      <div style="display:flex;align-items:center;gap:var(--space-4);flex-wrap:wrap;margin-bottom:var(--space-3);">
+        <span class="badge badge-beginner">Beginner</span>
+        <span style="color:var(--color-text-muted);font-size:var(--font-size-sm);">&#x23F1; 1-2 hours</span>
+      </div>
+      <h1 style="border-bottom:none;margin-bottom:var(--space-3);">SSL/TLS Certificate Inspector</h1>
+      <p style="font-size:var(--font-size-lg);color:var(--color-text-secondary);">Fetch and analyze SSL/TLS certificates — check expiry, issuer chain, cipher suites, and security configuration.</p>
+      <div style="display:flex;flex-wrap:wrap;gap:var(--space-2);margin-top:var(--space-3);">
+        <span class="tag">python</span>
+        <span class="tag">ssl</span>
+        <span class="tag">tls</span>
+        <span class="tag">certificates</span>
+      </div>
+    </div>
+
+    <!-- Progress Button -->
+    <div id="progressBtn" style="margin-bottom:var(--space-8);"></div>
+
+    <!-- Learning Objectives -->
+    <h2>Learning Objectives</h2>
+    <ul style="margin-left:var(--space-6);margin-bottom:var(--space-6);color:var(--color-text-secondary);">
+      <li>Understand the X.509 certificate structure and how TLS trust chains work</li>
+      <li>Use Python's <code>ssl</code> and <code>cryptography</code> modules to retrieve and parse certificates</li>
+      <li>Identify certificate problems: expiry, weak signature algorithms (SHA-1), small key sizes</li>
+      <li>Learn to spot self-signed, wildcard, and multi-domain (SAN) certificates</li>
+      <li>Build a practical tool for security audits and reconnaissance</li>
+    </ul>
+
+    <!-- Prerequisites -->
+    <h2>Prerequisites</h2>
+    <ul style="margin-left:var(--space-6);margin-bottom:var(--space-6);color:var(--color-text-secondary);">
+      <li>Python 3.8+ (standard library <code>ssl</code> module is built-in)</li>
+      <li>The <code>cryptography</code> package for extended parsing (<code>pip install cryptography</code>)</li>
+      <li>Basic understanding of what SSL/TLS certificates are and why HTTPS matters</li>
+    </ul>
+
+    <!-- Step 1 -->
+    <h2>Step 1: Fetch a Server's Certificate</h2>
+    <p>Connect to any TLS-enabled server and retrieve its certificate chain. Python's <code>ssl</code> module makes this straightforward.</p>
+
+    <pre><code>import ssl
+import socket
+from datetime import datetime, timezone
+
+def get_certificate(hostname: str, port: int = 443, timeout: float = 5.0) -> dict:
+    """Connect to a server and retrieve its SSL/TLS certificate."""
+
+    context = ssl.create_default_context()
+    # Don't verify — we want to inspect even bad certs
+    context.check_hostname = False
+    context.verify_mode = ssl.CERT_NONE
+
+    with socket.create_connection((hostname, port), timeout=timeout) as sock:
+        with context.wrap_socket(sock, server_hostname=hostname) as ssock:
+            cert_bin = ssock.getpeercert(binary_form=True)
+            cert_dict = ssock.getpeercert()  # Parsed form
+            cipher = ssock.cipher()           # (name, version, bits)
+
+    return {
+        "hostname": hostname,
+        "port": port,
+        "cert_der": cert_bin,
+        "cert_dict": cert_dict,
+        "cipher": cipher,
+    }
+
+# Test it
+result = get_certificate("example.com")
+print(f"Connected to {result['hostname']}:{result['port']}")
+print(f"Cipher: {result['cipher'][0]} ({result['cipher'][2]} bits)")
+print(f"Subject: {dict(x[0] for x in result['cert_dict']['subject'])}")
+print(f"Issuer:  {dict(x[0] for x in result['cert_dict']['issuer'])}")</code></pre>
+
+    <!-- Step 2 -->
+    <h2>Step 2: Parse and Analyze Certificate Details</h2>
+    <p>Use the <code>cryptography</code> library to decode the DER binary and extract rich certificate information — validity dates, SANs, key usage, and more.</p>
+
+    <pre><code>from cryptography import x509
+from cryptography.x509.oid import NameOID, ExtensionOID
+from cryptography.hazmat.primitives import hashes
+
+def analyze_certificate(cert_der: bytes) -> dict:
+    """Parse a DER-encoded certificate and extract key details."""
+
+    cert = x509.load_der_x509_certificate(cert_der)
+
+    # Subject
+    subject_cn = cert.subject.get_attributes_for_oid(NameOID.COMMON_NAME)
+    cn = subject_cn[0].value if subject_cn else "N/A"
+
+    # Issuer
+    issuer_cn = cert.issuer.get_attributes_for_oid(NameOID.COMMON_NAME)
+    issuer = issuer_cn[0].value if issuer_cn else "N/A"
+
+    # Validity
+    now = datetime.now(timezone.utc)
+    days_left = (cert.not_valid_after_utc - now).days
+
+    # Subject Alternative Names (SANs)
+    sans = []
+    try:
+        san_ext = cert.extensions.get_extension_for_oid(
+            ExtensionOID.SUBJECT_ALTERNATIVE_NAME
+        )
+        sans = san_ext.value.get_values_for_type(x509.DNSName)
+    except x509.ExtensionNotFound:
+        pass
+
+    # Signature algorithm
+    sig_alg = cert.signature_algorithm_oid._name
+
+    # Fingerprints
+    fingerprint_sha1 = cert.fingerprint(hashes.SHA1()).hex()
+    fingerprint_sha256 = cert.fingerprint(hashes.SHA256()).hex()
+
+    # Key size
+    public_key = cert.public_key()
+    key_size = public_key.key_size
+
+    # Serial number
+    serial = hex(cert.serial_number)
+
+    return {
+        "cn": cn,
+        "issuer": issuer,
+        "serial": serial,
+        "not_before": cert.not_valid_before_utc,
+        "not_after": cert.not_valid_after_utc,
+        "days_left": days_left,
+        "self_signed": (cert.issuer == cert.subject),
+        "sans": sans,
+        "signature_algorithm": sig_alg,
+        "key_size": key_size,
+        "sha1_fingerprint": fingerprint_sha1,
+        "sha256_fingerprint": fingerprint_sha256,
+    }
+
+# Test
+result = get_certificate("google.com")
+info = analyze_certificate(result["cert_der"])
+print(f"CN: {info['cn']}")
+print(f"Issuer: {info['issuer']}")
+print(f"Valid: {info['not_before'].strftime('%Y-%m-%d')} to {info['not_after'].strftime('%Y-%m-%d')}")
+print(f"Days left: {info['days_left']}")
+print(f"Key: {info['key_size']}-bit, Sig: {info['signature_algorithm']}")
+print(f"SANs: {', '.join(info['sans'][:5])}...")
+print(f"Self-signed: {info['self_signed']}")</code></pre>
+
+    <!-- Step 3 -->
+    <h2>Step 3: Security Grade Assessment</h2>
+    <p>Build logic to flag security issues — expired certificates, weak keys, deprecated algorithms, and missing features.</p>
+
+    <pre><code>from enum import Enum
+
+class Severity(Enum):
+    OK = "✅"
+    WARN = "⚠️"
+    FAIL = "❌"
+
+def assess_security(info: dict) -> list:
+    """Analyze certificate and return a list of security findings."""
+
+    findings = []
+
+    # Expiry check
+    if info["days_left"] < 0:
+        findings.append((Severity.FAIL, f"Certificate EXPIRED {abs(info['days_left'])} days ago"))
+    elif info["days_left"] < 30:
+        findings.append((Severity.WARN, f"Certificate expires in {info['days_left']} days"))
+    elif info["days_left"] < 90:
+        findings.append((Severity.OK, f"Certificate expires in {info['days_left']} days — renew soon"))
+    else:
+        findings.append((Severity.OK, f"Certificate valid for {info['days_left']} days"))
+
+    # Key size check (NIST recommends 2048+ for RSA)
+    if info["key_size"] < 2048:
+        findings.append((Severity.FAIL, f"Key size {info['key_size']} bits is INSECURE (min 2048)"))
+    elif info["key_size"] < 4096:
+        findings.append((Severity.OK, f"Key size {info['key_size']} bits meets minimum"))
+    else:
+        findings.append((Severity.OK, f"Key size {info['key_size']} bits — strong"))
+
+    # Signature algorithm
+    if "sha1" in info["signature_algorithm"].lower():
+        findings.append((Severity.FAIL, f"Weak signature: {info['signature_algorithm']} (SHA-1 is broken)"))
+    elif "sha256" in info["signature_algorithm"].lower() or "sha384" in info["signature_algorithm"].lower():
+        findings.append((Severity.OK, f"Signature algorithm: {info['signature_algorithm']}"))
+    elif "md5" in info["signature_algorithm"].lower():
+        findings.append((Severity.FAIL, f"MD5 signature: {info['signature_algorithm']} — completely broken!"))
+    else:
+        findings.append((Severity.WARN, f"Signature algorithm: {info['signature_algorithm']}"))
+
+    # Self-signed
+    if info["self_signed"]:
+        findings.append((Severity.WARN, "Self-signed certificate — not trusted by browsers"))
+
+    # SAN check (modern certs should have SANs)
+    if not info["sans"]:
+        findings.append((Severity.WARN, "No Subject Alternative Names — browsers may reject"))
+
+    return findings
+
+# Test against Let's Encrypt + a known bad cert
+for host in ["letsencrypt.org", "expired.badssl.com"]:
+    try:
+        result = get_certificate(host)
+        info = analyze_certificate(result["cert_der"])
+        print(f"\n{'='*60}")
+        print(f"  {host} — {info['cn']}")
+        print(f"{'='*60}")
+        for severity, msg in assess_security(info):
+            print(f"  {severity.value} {msg}")
+    except Exception as e:
+        print(f"  ❌ Error for {host}: {e}")</code></pre>
+
+    <!-- Step 4 -->
+    <h2>Step 4: Build the Complete Inspector CLI</h2>
+    <p>Wire everything together with <code>argparse</code> for a professional CLI tool. Support single-target analysis and bulk scanning from a file.</p>
+
+    <pre><code>import argparse
+import sys
+
+def inspect_host(hostname: str, port: int = 443) -> None:
+    """Fetch, parse, analyze, and pretty-print certificate info."""
+
+    try:
+        result = get_certificate(hostname, port)
+        info = analyze_certificate(result["cert_der"])
+    except socket.timeout:
+        print(f"❌ {hostname}:{port} — Connection timed out")
+        return
+    except ssl.SSLError as e:
+        print(f"❌ {hostname}:{port} — SSL error: {e}")
+        return
+    except Exception as e:
+        print(f"❌ {hostname}:{port} — Error: {e}")
+        return
+
+    print(f"\n{'='*60}")
+    print(f"  {hostname}:{port}")
+    print(f"  Subject: {info['cn']}")
+    print(f"  Issuer:  {info['issuer']}")
+    print(f"  Serial:  {info['serial']}")
+    print(f"  Valid:   {info['not_before'].strftime('%Y-%m-%d')} → {info['not_after'].strftime('%Y-%m-%d')}")
+    print(f"  Cipher:  {result['cipher'][0]} ({result['cipher'][2]} bits)")
+    print(f"  Key:     {info['key_size']}-bit | Sig: {info['signature_algorithm']}")
+    print(f"  SHA256:  {info['sha256_fingerprint']}")
+    if info['sans']:
+        print(f"  SANs:    {', '.join(info['sans'][:8])}")
+    print(f"{'='*60}")
+
+    for severity, msg in assess_security(info):
+        print(f"  {severity.value} {msg}")
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="SSL/TLS Certificate Inspector — analyze certs for security issues"
+    )
+    parser.add_argument("hosts", nargs="+", help="Hostname(s) to inspect")
+    parser.add_argument("-p", "--port", type=int, default=443,
+                        help="Port (default: 443)")
+    parser.add_argument("-f", "--file", help="Read hostnames from file (one per line)")
+
+    args = parser.parse_args()
+
+    hosts = args.hosts
+    if args.file:
+        with open(args.file) as f:
+            hosts.extend(line.strip() for line in f if line.strip())
+
+    for host in hosts:
+        inspect_host(host, args.port)
+
+if __name__ == "__main__":
+    main()</code></pre>
+
+    <!-- Testing -->
+    <h2>Testing Your Inspector</h2>
+    <p>Verify against known-good and known-bad test sites:</p>
+    <ul style="margin-left:var(--space-6);margin-bottom:var(--space-6);color:var(--color-text-secondary);">
+      <li><strong>badssl.com:</strong> A fantastic QA resource — test <code>expired.badssl.com</code>, <code>self-signed.badssl.com</code>, <code>sha1-intermediate.badssl.com</code>, <code>1000-sans.badssl.com</code></li>
+      <li><strong>google.com / cloudflare.com:</strong> Should return clean reports with modern configs</li>
+      <li><strong>Compare with SSL Labs:</strong> Run <a href="https://www.ssllabs.com/ssltest/">SSL Labs</a> on the same host and compare findings</li>
+      <li><strong>localhost scan:</strong> If you have a local web server, test against it</li>
+    </ul>
+
+    <!-- Extensions -->
+    <h2>Extension Ideas</h2>
+    <ul style="margin-left:var(--space-6);margin-bottom:var(--space-6);color:var(--color-text-secondary);">
+      <li><strong>TLS version checking:</strong> Test which TLS versions a server supports (1.0, 1.1 should fail; 1.2, 1.3 should pass)</li>
+      <li><strong>Certificate chain validation:</strong> Build the full chain to a trusted root and verify every signature in the chain</li>
+      <li><strong>CT log search:</strong> Query <a href="https://crt.sh/">crt.sh</a> for Certificate Transparency logs — discover all certs ever issued for a domain</li>
+      <li><strong>JSON/HTML report:</strong> Generate machine-readable JSON or a styled HTML report for compliance audits</li>
+      <li><strong>Monitoring mode:</strong> Check certificates daily via cron and alert before they expire</li>
+    </ul>
+
+    <!-- Resources -->
+    <h2>Resources &amp; Next Steps</h2>
+    <div style="display:flex;flex-direction:column;gap:var(--space-2);margin-bottom:var(--space-8);">
+      <a class="resource-link" href="https://www.ssllabs.com/ssltest/" target="_blank" rel="noopener">
+        <span class="resource-link-icon">&#x1F50D;</span> SSL Labs Server Test (gold standard)
+      </a>
+      <a class="resource-link" href="https://ssl-config.mozilla.org/" target="_blank" rel="noopener">
+        <span class="resource-link-icon">&#x1F527;</span> Mozilla SSL Configuration Generator
+      </a>
+      <a class="resource-link" href="https://badssl.com/" target="_blank" rel="noopener">
+        <span class="resource-link-icon">&#x1F9EA;</span> badssl.com — Test against intentionally broken certs
+      </a>
+      <a class="resource-link" href="https://cryptography.io/en/latest/x509/reference/" target="_blank" rel="noopener">
+        <span class="resource-link-icon">&#x1F4D8;</span> Python Cryptography: X.509 Reference
+      </a>
+    </div>
+
+    <!-- Cert Relevance -->
+    <div class="callout">
+      <div class="callout-title">&#x1F393; Cert Relevance</div>
+      <p>TLS certificates are a core topic on <strong>CompTIA Security+</strong> (PKI, certificate lifecycle, trust models). This project directly prepares you for <strong>eJPT</strong> where SSL/TLS reconnaissance is a required enumeration skill. For <strong>OSCP</strong>, understanding certificate parsing helps you identify weak SSL configs and exploit certificate-related vulnerabilities. The tool you build is also useful for <strong>CISSP Domain 3</strong> (cryptography and PKI).</p>
+    </div>
+
+  </div>
+
+  <!-- JS -->
+  <script src="/assets/js/data.js"></script>
+  <script src="/assets/js/theme.js"></script>
+  <script src="/assets/js/components.js"></script>
+  <script src="/assets/js/progress.js"></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      document.body.prepend(renderNav());
+      document.body.appendChild(renderFooter());
+      const btnContainer = document.getElementById('progressBtn');
+      if (btnContainer) btnContainer.appendChild(renderProgressButton('cert-inspector'));
+      initCopyButtons();
+    });
+  </script>
+</body>
+</html>

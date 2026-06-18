@@ -1,0 +1,988 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SIEM Dashboard (Mini) — sec-projects</title>
+  <meta name="description" content="Build a mini SIEM — ingest logs, create detection rules, visualize threats on a dashboard. Your intro to security operations.">
+
+  <meta property="og:title" content="SIEM Dashboard (Mini) — sec-projects">
+  <meta property="og:description" content="Build a mini SIEM — ingest logs, create detection rules, and visualize threats on a dashboard.">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://sec-projects.pages.dev/projects/advanced/siem-dashboard.html">
+
+  <link rel="canonical" href="https://sec-projects.pages.dev/projects/advanced/siem-dashboard.html">
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+  <link rel="stylesheet" href="/assets/css/theme.css">
+  <link rel="stylesheet" href="/assets/css/layout.css">
+  <link rel="stylesheet" href="/assets/css/components.css">
+</head>
+<body>
+  <div class="container" style="max-width:900px; margin: calc(var(--nav-height) + var(--space-8)) auto var(--space-8); padding: 0 var(--space-6);">
+
+    <!-- Breadcrumbs -->
+    <div class="breadcrumbs">
+      <a href="/">Home</a>
+      <span class="breadcrumb-sep">/</span>
+      <a href="/?cat=advanced">Advanced</a>
+      <span class="breadcrumb-sep">/</span>
+      <span>SIEM Dashboard (Mini)</span>
+    </div>
+
+    <!-- Header -->
+    <div style="margin-bottom:var(--space-8);">
+      <div style="display:flex;align-items:center;gap:var(--space-4);flex-wrap:wrap;margin-bottom:var(--space-3);">
+        <span class="badge badge-expert">Expert</span>
+        <span style="color:var(--color-text-muted);font-size:var(--font-size-sm);">&#x23F1; 6-10 hours</span>
+      </div>
+      <h1 style="border-bottom:none;margin-bottom:var(--space-3);">SIEM Dashboard (Mini)</h1>
+      <p style="font-size:var(--font-size-lg);color:var(--color-text-secondary);">Build a mini SIEM — ingest logs, create detection rules, visualize threats on a dashboard. Your intro to security operations.</p>
+      <div style="display:flex;flex-wrap:wrap;gap:var(--space-2);margin-top:var(--space-3);">
+        <span class="tag">python</span>
+        <span class="tag">elasticsearch</span>
+        <span class="tag">kibana</span>
+        <span class="tag">siem</span>
+        <span class="tag">dashboard</span>
+      </div>
+    </div>
+
+    <!-- Progress Button -->
+    <div id="progressBtn" style="margin-bottom:var(--space-8);"></div>
+
+    <!-- Learning Objectives -->
+    <h2>Learning Objectives</h2>
+    <ul style="margin-left:var(--space-6);margin-bottom:var(--space-6);color:var(--color-text-secondary);">
+      <li>Understand SIEM architecture: log ingestion → parsing → enrichment → detection → visualization</li>
+      <li>Build a real-time log ingestion pipeline that handles syslog, JSON, and common security event formats</li>
+      <li>Write detection rules for common attacks: brute force, port scans, privilege escalation, web attacks</li>
+      <li>Create a threat dashboard with visualizations for alerts, trends, and attacker activity</li>
+      <li>Learn the skills that directly translate to enterprise SIEMs: Splunk, Elastic Security, QRadar</li>
+    </ul>
+
+    <!-- Prerequisites -->
+    <h2>Prerequisites</h2>
+    <ul style="margin-left:var(--space-6);margin-bottom:var(--space-6);color:var(--color-text-secondary);">
+      <li>Python 3.10+ with Flask, SQLite (built-in), and <code>python-dateutil</code></li>
+      <li>Docker (optional but recommended for running Elasticsearch)</li>
+      <li>Understanding of common log formats: syslog (RFC 5424), JSON, Apache/Nginx access logs</li>
+      <li>Basic web development knowledge (Flask, HTML, CSS)</li>
+    </ul>
+
+    <!-- Step 1 -->
+    <h2>Step 1: Log Ingestion Engine</h2>
+    <p>Build the heart of the SIEM — a log ingestion service that accepts logs via multiple transports (syslog UDP, HTTP JSON, file tailing) and normalizes them into a common event format.</p>
+
+    <pre><code>import json
+import re
+import socket
+import threading
+import time
+import sqlite3
+from datetime import datetime, timezone
+from dataclasses import dataclass, asdict
+from typing import Optional
+
+@dataclass
+class SecurityEvent:
+    """Normalized security event — the common format for all ingested logs."""
+
+    timestamp: str          # ISO 8601
+    source: str            # Where the log came from (hostname or IP)
+    event_type: str        # ssh, http, firewall, auth, etc.
+    severity: str          # CRITICAL, HIGH, MEDIUM, LOW, INFO
+    raw_message: str       # Original log line
+    parsed_fields: dict    # Extracted fields (username, src_ip, port, etc.)
+
+class LogIngestor:
+    """Multi-transport log ingestion engine."""
+
+    def __init__(self, db_path: str = "siem_events.db"):
+        self.db_path = db_path
+        self._init_db()
+        self.running = False
+        self.event_count = 0
+
+    def _init_db(self):
+        """Initialize SQLite database for event storage."""
+        conn = sqlite3.connect(self.db_path)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT NOT NULL,
+                source TEXT,
+                event_type TEXT,
+                severity TEXT,
+                raw_message TEXT,
+                parsed_fields TEXT,  -- JSON
+                ingested_at TEXT DEFAULT (datetime('now'))
+            )
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_timestamp ON events(timestamp)
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_event_type ON events(event_type)
+        """)
+        conn.commit()
+        conn.close()
+
+    def store_event(self, event: SecurityEvent):
+        """Persist a normalized event to the database."""
+        conn = sqlite3.connect(self.db_path)
+        conn.execute(
+            "INSERT INTO events (timestamp, source, event_type, severity, raw_message, parsed_fields) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (event.timestamp, event.source, event.event_type, event.severity,
+             event.raw_message, json.dumps(event.parsed_fields))
+        )
+        conn.commit()
+        conn.close()
+        self.event_count += 1
+
+    def start_syslog_listener(self, host: str = "0.0.0.0", port: int = 5140):
+        """Listen for syslog messages on UDP (use port >1024 to avoid root)."""
+
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.bind((host, port))
+        print(f"[INGEST] Syslog UDP listener on {host}:{port}")
+
+        while self.running:
+            try:
+                sock.settimeout(1.0)
+                data, addr = sock.recvfrom(65535)
+                msg = data.decode("utf-8", errors="replace")
+                event = self._parse_syslog(msg, addr[0])
+                self.store_event(event)
+            except socket.timeout:
+                continue
+            except Exception as e:
+                print(f"[INGEST] UDP error: {e}")
+
+    def _parse_syslog(self, msg: str, source_ip: str) -> SecurityEvent:
+        """Parse a syslog message into a normalized SecurityEvent.
+
+        Handles: &lt;PRI&gt;TIMESTAMP HOSTNAME PROC[PID]: MESSAGE
+        """
+
+        # Strip priority
+        pri_match = re.match(r'<(\d+)>', msg)
+        priority = int(pri_match.group(1)) if pri_match else 13
+        if pri_match:
+            msg = msg[pri_match.end():]
+
+        # Extract timestamp
+        ts_match = re.match(
+            r'(\w{3}\s+\d+\s+\d{2}:\d{2}:\d{2})', msg
+        )
+        timestamp = datetime.now(timezone.utc).isoformat()
+        if ts_match:
+            try:
+                ts_str = f"{ts_match.group(1)} {datetime.now().year}"
+                dt = datetime.strptime(ts_str, "%b %d %H:%M:%S %Y")
+                timestamp = dt.replace(tzinfo=timezone.utc).isoformat()
+                msg = msg[ts_match.end():].strip()
+            except:
+                pass
+
+        # Determine event type and severity
+        msg_lower = msg.lower()
+
+        if "sshd" in msg_lower or "ssh" in msg_lower:
+            event_type = "ssh"
+            if "failed" in msg_lower or "invalid" in msg_lower:
+                severity = "HIGH"
+            elif "accepted" in msg_lower:
+                severity = "INFO"
+            else:
+                severity = "MEDIUM"
+        elif "sudo" in msg_lower:
+            event_type = "auth"
+            severity = "MEDIUM"
+        elif "firewall" in msg_lower or "iptables" in msg_lower:
+            event_type = "firewall"
+            severity = "MEDIUM"
+        elif "http" in msg_lower or "nginx" in msg_lower or "apache" in msg_lower:
+            event_type = "http"
+            severity = "LOW"
+        else:
+            event_type = "syslog"
+            severity = "LOW"
+
+        # Extract fields
+        parsed = {"hostname": source_ip}
+
+        # Extract username from SSH logs
+        user_match = re.search(r'user[= ](\S+)', msg_lower)
+        if user_match:
+            parsed["username"] = user_match.group(1)
+
+        # Extract IP from SSH logs
+        ip_match = re.search(r'from (\d+\.\d+\.\d+\.\d+)', msg)
+        if ip_match:
+            parsed["src_ip"] = ip_match.group(1)
+
+        # Extract port
+        port_match = re.search(r'port (\d+)', msg_lower)
+        if port_match:
+            parsed["port"] = int(port_match.group(1))
+
+        return SecurityEvent(
+            timestamp=timestamp,
+            source=parsed.get("hostname", source_ip),
+            event_type=event_type,
+            severity=severity,
+            raw_message=msg,
+            parsed_fields=parsed
+        )
+
+    def start_http_listener(self, host: str = "0.0.0.0", port: int = 8080):
+        """Accept JSON log events via HTTP POST."""
+
+        from http.server import HTTPServer, BaseHTTPRequestHandler
+
+        ingestor = self  # Capture reference for inner class
+
+        class EventHandler(BaseHTTPRequestHandler):
+            def do_POST(self):
+                content_length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(content_length)
+
+                try:
+                    data = json.loads(body)
+                    event = SecurityEvent(
+                        timestamp=data.get("timestamp", datetime.now(timezone.utc).isoformat()),
+                        source=data.get("source", self.client_address[0]),
+                        event_type=data.get("event_type", "custom"),
+                        severity=data.get("severity", "INFO"),
+                        raw_message=data.get("message", ""),
+                        parsed_fields=data.get("fields", {})
+                    )
+                    ingestor.store_event(event)
+
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.end_headers()
+                    self.wfile.write(json.dumps({"status": "ok"}).encode())
+                except Exception as e:
+                    self.send_response(400)
+                    self.end_headers()
+                    self.wfile.write(json.dumps({"error": str(e)}).encode())
+
+            def log_message(self, format, *args):
+                pass  # Suppress HTTP server log noise
+
+        server = HTTPServer((host, port), EventHandler)
+        print(f"[INGEST] HTTP JSON listener on {host}:{port}")
+
+        while self.running:
+            server.handle_request()
+
+    def start(self, enable_syslog: bool = True, enable_http: bool = True):
+        """Start all ingestion listeners."""
+        self.running = True
+
+        if enable_syslog:
+            t = threading.Thread(target=self.start_syslog_listener, daemon=True)
+            t.start()
+
+        if enable_http:
+            t = threading.Thread(target=self.start_http_listener, daemon=True)
+            t.start()
+
+        print(f"[INGEST] {self.event_count} events ingested... (Ctrl+C to stop)")
+        try:
+            while self.running:
+                time.sleep(5)
+        except KeyboardInterrupt:
+            self.running = False
+            print(f"\n[INGEST] Stopped. Total events: {self.event_count}")
+
+
+# Quick test
+if __name__ == "__main__":
+    ingestor = LogIngestor()
+
+    # Test with a simulated SSH failed login event
+    test_event = SecurityEvent(
+        timestamp=datetime.now(timezone.utc).isoformat(),
+        source="192.168.1.100",
+        event_type="ssh",
+        severity="HIGH",
+        raw_message="Failed password for root from 10.0.0.55 port 22 ssh2",
+        parsed_fields={"username": "root", "src_ip": "10.0.0.55", "port": 22}
+    )
+    ingestor.store_event(test_event)
+    print(f"Test event stored. Total: {ingestor.event_count}")</code></pre>
+
+    <!-- Step 2 -->
+    <h2>Step 2: Detection Rules Engine</h2>
+    <p>The SIEM's brain — a rules engine that evaluates incoming events against detection logic. Build rules for brute force, port scanning, privilege escalation, and web attacks.</p>
+
+    <pre><code>from collections import defaultdict
+from datetime import datetime, timedelta
+import json
+
+class DetectionRule:
+    """Base class for detection rules."""
+
+    def __init__(self, rule_id: str, name: str, description: str, severity: str):
+        self.rule_id = rule_id
+        self.name = name
+        self.description = description
+        self.severity = severity
+
+    def evaluate(self, event: dict) -> Optional[dict]:
+        """Evaluate this rule against an event. Returns alert dict or None."""
+        raise NotImplementedError
+
+
+class BruteForceDetector(DetectionRule):
+    """Detect SSH/RDP brute force attacks based on failed login threshold."""
+
+    def __init__(self):
+        super().__init__(
+            "BRUTE-001", "SSH Brute Force Detection",
+            "Detects multiple failed SSH login attempts from same source IP",
+            "HIGH"
+        )
+        self.threshold = 5          # Failed attempts
+        self.window_seconds = 300   # Within 5 minutes
+        self.failed_attempts = defaultdict(list)  # {src_ip: [timestamps]}
+
+    def evaluate(self, event: dict) -> Optional[dict]:
+        if event.get("event_type") == "ssh" and event.get("severity") == "HIGH":
+            parsed = json.loads(event["parsed_fields"]) if isinstance(
+                event.get("parsed_fields"), str) else event.get("parsed_fields", {})
+
+            src_ip = parsed.get("src_ip", event.get("source"))
+
+            if src_ip:
+                now = datetime.now()
+                self.failed_attempts[src_ip].append(now)
+
+                # Prune old entries
+                cutoff = now - timedelta(seconds=self.window_seconds)
+                self.failed_attempts[src_ip] = [
+                    t for t in self.failed_attempts[src_ip] if t > cutoff
+                ]
+
+                count = len(self.failed_attempts[src_ip])
+                if count >= self.threshold:
+                    return {
+                        "rule_id": self.rule_id,
+                        "rule_name": self.name,
+                        "severity": self.severity,
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "source_ip": src_ip,
+                        "description": f"{count} failed SSH login attempts from {src_ip} in last {self.window_seconds}s",
+                        "evidence": {
+                            "failed_attempts": count,
+                            "window": self.window_seconds,
+                            "target_user": parsed.get("username", "unknown")
+                        }
+                    }
+
+        return None
+
+
+class PortScanDetector(DetectionRule):
+    """Detect port scanning behavior by counting connections to unique ports."""
+
+    def __init__(self):
+        super().__init__(
+            "SCAN-001", "Port Scan Detection",
+            "Detects rapid connections to multiple ports from single source IP",
+            "MEDIUM"
+        )
+        self.threshold_ports = 20    # Unique destination ports
+        self.window_seconds = 60     # Within 1 minute
+        self.port_connections = defaultdict(lambda: {"ports": set(), "first_seen": None})
+
+    def evaluate(self, event: dict) -> Optional[dict]:
+        if event.get("event_type") == "firewall":
+            parsed = json.loads(event["parsed_fields"]) if isinstance(
+                event.get("parsed_fields"), str) else event.get("parsed_fields", {})
+
+            src_ip = parsed.get("src_ip", event.get("source"))
+            dst_port = parsed.get("dport") or parsed.get("port")
+
+            if src_ip and dst_port:
+                now = datetime.now()
+                record = self.port_connections[src_ip]
+
+                if record["first_seen"] is None:
+                    record["first_seen"] = now
+
+                # Reset if window expired
+                if (now - record["first_seen"]).total_seconds() > self.window_seconds:
+                    record["ports"] = set()
+                    record["first_seen"] = now
+
+                record["ports"].add(int(dst_port))
+
+                if len(record["ports"]) >= self.threshold_ports:
+                    return {
+                        "rule_id": self.rule_id,
+                        "rule_name": self.name,
+                        "severity": self.severity,
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "source_ip": src_ip,
+                        "description": f"Port scan detected: {len(record['ports'])} unique ports from {src_ip}",
+                        "evidence": {
+                            "unique_ports": len(record["ports"]),
+                            "window_seconds": self.window_seconds,
+                        }
+                    }
+
+        return None
+
+
+class PrivEscDetector(DetectionRule):
+    """Detect potential privilege escalation via sudo abuse or SUID exploitation."""
+
+    def __init__(self):
+        super().__init__(
+            "PRIVESC-001", "Privilege Escalation Detection",
+            "Detects suspicious privilege escalation activity via sudo/SUID",
+            "CRITICAL"
+        )
+        self.suspicious_commands = [
+            "/bin/bash", "/bin/sh", "/bin/zsh", "chmod u+s", "chown root",
+            "nc -e", "python -c", "perl -e", "/etc/shadow", "/etc/sudoers"
+        ]
+
+    def evaluate(self, event: dict) -> Optional[dict]:
+        if event.get("event_type") == "auth":
+            raw = event.get("raw_message", "").lower()
+
+            for cmd_pattern in self.suspicious_commands:
+                if cmd_pattern.lower() in raw and "sudo" in raw:
+                    return {
+                        "rule_id": self.rule_id,
+                        "rule_name": self.name,
+                        "severity": self.severity,
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "source": event.get("source"),
+                        "description": f"Suspicious sudo command detected: contains '{cmd_pattern}'",
+                        "evidence": {"command_fragment": cmd_pattern, "raw_log": raw}
+                    }
+
+        return None
+
+
+class DetectionEngine:
+    """Runs all detection rules against incoming events."""
+
+    def __init__(self, db_path: str = "siem_events.db"):
+        self.db_path = db_path
+        self.rules = [
+            BruteForceDetector(),
+            PortScanDetector(),
+            PrivEscDetector(),
+        ]
+        self.alerts = []  # Generated alerts
+
+    def run_rules(self) -> list:
+        """Run all detection rules against recent events in the database."""
+
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+
+        # Get events from last 10 minutes
+        cutoff = (datetime.now() - timedelta(minutes=10)).isoformat()
+        cursor = conn.execute(
+            "SELECT * FROM events WHERE timestamp > ? ORDER BY timestamp DESC LIMIT 1000",
+            (cutoff,)
+        )
+
+        new_alerts = []
+        for row in cursor:
+            event = dict(row)
+            for rule in self.rules:
+                try:
+                    alert = rule.evaluate(event)
+                    if alert:
+                        new_alerts.append(alert)
+                        print(f"[ALERT] {rule.name}: {alert['description']}")
+                except Exception as e:
+                    print(f"[RULE ERROR] {rule.rule_id}: {e}")
+
+        conn.close()
+
+        # Store alerts
+        conn = sqlite3.connect(self.db_path)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS alerts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT,
+                rule_id TEXT,
+                rule_name TEXT,
+                severity TEXT,
+                source_ip TEXT,
+                description TEXT,
+                evidence TEXT,
+                acknowledged INTEGER DEFAULT 0
+            )
+        """)
+
+        for alert in new_alerts:
+            conn.execute(
+                "INSERT INTO alerts (timestamp, rule_id, rule_name, severity, source_ip, description, evidence) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (alert["timestamp"], alert["rule_id"], alert["rule_name"],
+                 alert["severity"], alert.get("source_ip", alert.get("source", "")),
+                 alert["description"], json.dumps(alert.get("evidence", {})))
+            )
+
+        conn.commit()
+        conn.close()
+
+        self.alerts.extend(new_alerts)
+        return new_alerts
+
+# Run detection engine
+engine = DetectionEngine()
+alerts = engine.run_rules()
+print(f"\nDetection complete: {len(alerts)} new alerts generated")</code></pre>
+
+    <!-- Step 3 -->
+    <h2>Step 3: Flask Dashboard API</h2>
+    <p>Build a REST API that powers the frontend dashboard. Expose event counts, alerts, top talkers, and trend data.</p>
+
+    <pre><code>from flask import Flask, jsonify, request, render_template_string
+import sqlite3
+from datetime import datetime, timedelta
+
+app = Flask(__name__)
+DB_PATH = "siem_events.db"
+
+def get_db():
+    """Get database connection with row factory."""
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+@app.route("/api/stats")
+def api_stats():
+    """Return dashboard statistics."""
+    conn = get_db()
+
+    # Total events
+    total = conn.execute("SELECT COUNT(*) as count FROM events").fetchone()["count"]
+
+    # Events by severity (last 24h)
+    cutoff = (datetime.now() - timedelta(hours=24)).isoformat()
+    severity_counts = {}
+    for row in conn.execute(
+        "SELECT severity, COUNT(*) as count FROM events "
+        "WHERE timestamp > ? GROUP BY severity", (cutoff,)
+    ):
+        severity_counts[row["severity"]] = row["count"]
+
+    # Top source IPs
+    top_sources = []
+    for row in conn.execute(
+        "SELECT source, COUNT(*) as count FROM events "
+        "WHERE timestamp > ? GROUP BY source ORDER BY count DESC LIMIT 10",
+        (cutoff,)
+    ):
+        top_sources.append({"ip": row["source"], "count": row["count"]})
+
+    # Events over time (hourly buckets, last 24h)
+    hourly = []
+    for row in conn.execute(
+        """SELECT strftime('%H', timestamp) as hour,
+                  COUNT(*) as count
+           FROM events
+           WHERE timestamp > ?
+           GROUP BY hour
+           ORDER BY hour""",
+        (cutoff,)
+    ):
+        hourly.append({"hour": row["hour"], "count": row["count"]})
+
+    # Total alerts
+    alert_count = conn.execute("SELECT COUNT(*) as count FROM alerts").fetchone()["count"]
+
+    # Recent alerts
+    recent_alerts = []
+    for row in conn.execute(
+        "SELECT * FROM alerts ORDER BY timestamp DESC LIMIT 20"
+    ):
+        recent_alerts.append(dict(row))
+
+    conn.close()
+
+    return jsonify({
+        "total_events": total,
+        "events_by_severity": severity_counts,
+        "top_sources": top_sources,
+        "hourly_events": hourly,
+        "total_alerts": alert_count,
+        "recent_alerts": recent_alerts,
+    })
+
+@app.route("/api/events")
+def api_events():
+    """Return recent events with optional filtering."""
+    event_type = request.args.get("type", "")
+    limit = min(int(request.args.get("limit", 100)), 1000)
+
+    conn = get_db()
+    query = "SELECT * FROM events"
+    params = []
+
+    if event_type:
+        query += " WHERE event_type = ?"
+        params.append(event_type)
+
+    query += " ORDER BY timestamp DESC LIMIT ?"
+    params.append(limit)
+
+    events = []
+    for row in conn.execute(query, params):
+        event = dict(row)
+        # Parse parsed_fields from JSON string
+        if isinstance(event.get("parsed_fields"), str):
+            try:
+                event["parsed_fields"] = json.loads(event["parsed_fields"])
+            except:
+                pass
+        events.append(event)
+
+    conn.close()
+    return jsonify(events)
+
+@app.route("/api/search")
+def api_search():
+    """Search events by raw message content."""
+    q = request.args.get("q", "")
+    limit = min(int(request.args.get("limit", 100)), 500)
+
+    conn = get_db()
+    results = []
+    for row in conn.execute(
+        "SELECT * FROM events WHERE raw_message LIKE ? "
+        "ORDER BY timestamp DESC LIMIT ?",
+        (f"%{q}%", limit)
+    ):
+        results.append(dict(row))
+    conn.close()
+
+    return jsonify(results)
+
+@app.route("/")
+def dashboard():
+    """Serve the main dashboard page."""
+    return render_template_string(DASHBOARD_HTML)
+
+# Production tip: use gunicorn instead
+# gunicorn -w 4 -b 0.0.0.0:5000 siem_dashboard:app
+print("Starting SIEM Dashboard on http://localhost:5000")
+# app.run(host="0.0.0.0", port=5000, debug=True)</code></pre>
+
+    <!-- Step 4 -->
+    <h2>Step 4: Interactive Dashboard Frontend</h2>
+    <p>Build an HTML/CSS/JS dashboard that fetches data from the API and renders it with live updates.</p>
+
+    <pre><code>DASHBOARD_HTML = """&lt;!DOCTYPE html&gt;
+&lt;html lang="en"&gt;
+&lt;head&gt;
+  &lt;meta charset="UTF-8"&gt;
+  &lt;meta name="viewport" content="width=device-width, initial-scale=1.0"&gt;
+  &lt;title&gt;SIEM Dashboard&lt;/title&gt;
+  &lt;style&gt;
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Inter', -apple-system, sans-serif;
+      background: #0d1117; color: #f0f6fc;
+      padding: 20px;
+    }
+    .header {
+      display: flex; justify-content: space-between; align-items: center;
+      margin-bottom: 24px;
+    }
+    .header h1 { font-size: 1.5rem; color: #58a6ff; }
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+    .stat-card {
+      background: #161b22; border: 1px solid #30363d;
+      border-radius: 8px; padding: 16px;
+    }
+    .stat-card .label { color: #8b949e; font-size: 0.75rem;
+                         text-transform: uppercase; margin-bottom: 4px; }
+    .stat-card .value { font-size: 2rem; font-weight: 700; }
+    .stat-card .value.critical { color: #f85149; }
+    .stat-card .value.high { color: #d29922; }
+    .stat-card .value.medium { color: #58a6ff; }
+
+    .panels { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .panel {
+      background: #161b22; border: 1px solid #30363d;
+      border-radius: 8px; padding: 16px;
+    }
+    .panel h2 { font-size: 1rem; color: #f0f6fc;
+                margin-bottom: 12px; padding-bottom: 8px;
+                border-bottom: 1px solid #30363d; }
+
+    table { width: 100%; border-collapse: collapse; }
+    th, td { text-align: left; padding: 8px 12px; font-size: 0.875rem; }
+    th { color: #8b949e; border-bottom: 1px solid #30363d; }
+    td { border-bottom: 1px solid #21262d; color: #c9d1d9; }
+
+    .alert-row.critical { border-left: 3px solid #f85149; }
+    .alert-row.high { border-left: 3px solid #d29922; }
+    .alert-row.medium { border-left: 3px solid #58a6ff; }
+
+    .bar-chart { display: flex; align-items: flex-end; gap: 2px;
+                 height: 120px; margin-top: 8px; }
+    .bar-chart .bar {
+      flex: 1; background: #58a6ff;
+      border-radius: 2px 2px 0 0;
+      min-height: 2px; position: relative;
+    }
+    .bar-chart .bar:hover { background: #79c0ff; }
+
+    #last-updated { color: #8b949e; font-size: 0.75rem; }
+    @media (max-width: 768px) { .panels { grid-template-columns: 1fr; } }
+  &lt;/style&gt;
+&lt;/head&gt;
+&lt;body&gt;
+  &lt;div class="header"&gt;
+    &lt;h1&gt;🛡️ Mini SIEM Dashboard&lt;/h1&gt;
+    &lt;span id="last-updated"&gt;Loading...&lt;/span&gt;
+  &lt;/div&gt;
+
+  &lt;div class="stats-grid" id="stats"&gt;&lt;/div&gt;
+
+  &lt;div class="panels"&gt;
+    &lt;div class="panel"&gt;
+      &lt;h2&gt;📊 Event Volume (24h)&lt;/h2&gt;
+      &lt;div class="bar-chart" id="hourly-chart"&gt;&lt;/div&gt;
+    &lt;/div&gt;
+    &lt;div class="panel"&gt;
+      &lt;h2&gt;🌐 Top Source IPs&lt;/h2&gt;
+      &lt;table id="top-sources"&gt;
+        &lt;thead&gt;&lt;tr&gt;&lt;th&gt;IP&lt;/th&gt;&lt;th&gt;Events&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;
+        &lt;tbody&gt;&lt;/tbody&gt;
+      &lt;/table&gt;
+    &lt;/div&gt;
+  &lt;/div&gt;
+
+  &lt;div class="panel" style="margin-top:16px;"&gt;
+    &lt;h2&gt;🚨 Recent Alerts&lt;/h2&gt;
+    &lt;table id="alerts-table"&gt;
+      &lt;thead&gt;&lt;tr&gt;&lt;th&gt;Time&lt;/th&gt;&lt;th&gt;Severity&lt;/th&gt;&lt;th&gt;Rule&lt;/th&gt;&lt;th&gt;Description&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;
+      &lt;tbody&gt;&lt;/tbody&gt;
+    &lt;/table&gt;
+  &lt;/div&gt;
+
+  &lt;script&gt;
+    async function refresh() {
+      try {
+        const res = await fetch('/api/stats');
+        const data = await res.json();
+
+        // Stats cards
+        const stats = document.getElementById('stats');
+        stats.innerHTML = `
+          &lt;div class="stat-card"&gt;
+            &lt;div class="label"&gt;Total Events&lt;/div&gt;
+            &lt;div class="value"&gt;${data.total_events.toLocaleString()}&lt;/div&gt;
+          &lt;/div&gt;
+          &lt;div class="stat-card"&gt;
+            &lt;div class="label"&gt;Alerts&lt;/div&gt;
+            &lt;div class="value critical"&gt;${data.total_alerts}&lt;/div&gt;
+          &lt;/div&gt;
+          &lt;div class="stat-card"&gt;
+            &lt;div class="label"&gt;Critical/High&lt;/div&gt;
+            &lt;div class="value high"&gt;
+              ${(data.events_by_severity.CRITICAL || 0) +
+                (data.events_by_severity.HIGH || 0)}
+            &lt;/div&gt;
+          &lt;/div&gt;
+          &lt;div class="stat-card"&gt;
+            &lt;div class="label"&gt;Unique Sources&lt;/div&gt;
+            &lt;div class="value medium"&gt;${data.top_sources.length}&lt;/div&gt;
+          &lt;/div&gt;
+        `;
+
+        // Hourly bar chart
+        const chart = document.getElementById('hourly-chart');
+        const maxCount = Math.max(...data.hourly_events.map(h =&gt; h.count), 1);
+        chart.innerHTML = data.hourly_events.map(h =&gt;
+          `&lt;div class="bar" style="height:${(h.count/maxCount)*100}%"
+                title="${h.hour}:00 - ${h.count} events"&gt;&lt;/div&gt;`
+        ).join('');
+
+        if (data.hourly_events.length === 0) {
+          chart.innerHTML = '&lt;span style="color:#8b949e;font-size:0.875rem;"&gt;No data&lt;/span&gt;';
+        }
+
+        // Top sources
+        const sourcesBody = document.querySelector('#top-sources tbody');
+        sourcesBody.innerHTML = data.top_sources.map(s =&gt;
+          `&lt;tr&gt;&lt;td&gt;${s.ip}&lt;/td&gt;&lt;td&gt;${s.count.toLocaleString()}&lt;/td&gt;&lt;/tr&gt;`
+        ).join('');
+        if (data.top_sources.length === 0) {
+          sourcesBody.innerHTML = '&lt;tr&gt;&lt;td colspan="2" style="color:#8b949e;"&gt;No data&lt;/td&gt;&lt;/tr&gt;';
+        }
+
+        // Alerts table
+        const alertsBody = document.querySelector('#alerts-table tbody');
+        alertsBody.innerHTML = data.recent_alerts.map(a =&gt;
+          `&lt;tr class="alert-row ${a.severity.toLowerCase()}"&gt;
+            &lt;td&gt;${new Date(a.timestamp).toLocaleTimeString()}&lt;/td&gt;
+            &lt;td&gt;&lt;span style="color:${
+              a.severity === 'CRITICAL' ? '#f85149' :
+              a.severity === 'HIGH' ? '#d29922' : '#58a6ff'
+            };"&gt;${a.severity}&lt;/span&gt;&lt;/td&gt;
+            &lt;td&gt;${a.rule_name}&lt;/td&gt;
+            &lt;td&gt;${a.description}&lt;/td&gt;
+          &lt;/tr&gt;`
+        ).join('');
+        if (data.recent_alerts.length === 0) {
+          alertsBody.innerHTML = '&lt;tr&gt;&lt;td colspan="4" style="color:#8b949e;padding:16px;"&gt;✅ No alerts — system is quiet&lt;/td&gt;&lt;/tr&gt;';
+        }
+
+        document.getElementById('last-updated').textContent =
+          `Updated: ${new Date().toLocaleTimeString()}`;
+      } catch (e) {
+        console.error('Dashboard refresh error:', e);
+      }
+    }
+
+    refresh();
+    setInterval(refresh, 10000);  // Refresh every 10 seconds
+  &lt;/script&gt;
+&lt;/body&gt;
+&lt;/html&gt;"""</code></pre>
+
+    <!-- Step 5 -->
+    <h2>Step 5: Integration &amp; Deployment</h2>
+    <p>Wire everything together into a single runnable system. The ingestor, detection engine, and dashboard work together.</p>
+
+    <pre><code>#!/usr/bin/env python3
+"""run_siem.py — Full Mini SIEM with ingestion, detection, and dashboard."""
+
+import threading
+import time
+import argparse
+
+def main():
+    parser = argparse.ArgumentParser(description="Mini SIEM — Log Ingestion, Detection, Dashboard")
+    parser.add_argument("--db", default="siem_events.db", help="SQLite database path")
+    parser.add_argument("--syslog-port", type=int, default=5140, help="Syslog UDP port")
+    parser.add_argument("--http-port", type=int, default=8080, help="HTTP ingestion port")
+    parser.add_argument("--web-port", type=int, default=5000, help="Dashboard web port")
+    parser.add_argument("--detection-interval", type=int, default=30,
+                        help="Seconds between detection engine runs")
+    args = parser.parse_args()
+
+    # Start log ingestor (background thread)
+    ingestor = LogIngestor(db_path=args.db)
+    ingestor.running = True
+    threading.Thread(target=ingestor.start_syslog_listener,
+                     args=("0.0.0.0", args.syslog_port), daemon=True).start()
+    threading.Thread(target=ingestor.start_http_listener,
+                     args=("0.0.0.0", args.http_port), daemon=True).start()
+
+    print(f"""
+╔══════════════════════════════════════════════════════════════╗
+║                    MINI SIEM RUNNING                         ║
+║  Syslog Ingest:   UDP 0.0.0.0:{args.syslog_port:<5}                       ║
+║  HTTP Ingest:     http://0.0.0.0:{args.http_port:<5}                     ║
+║  Dashboard:       http://localhost:{args.web_port:<5}                     ║
+║  Database:        {args.db:<46} ║
+╚══════════════════════════════════════════════════════════════╝
+""")
+
+    # Detection engine loop
+    engine = DetectionEngine(db_path=args.db)
+
+    def detection_loop():
+        while True:
+            alerts = engine.run_rules()
+            if alerts:
+                print(f"[DETECTION] {len(alerts)} new alert(s)")
+            time.sleep(args.detection_interval)
+
+    threading.Thread(target=detection_loop, daemon=True).start()
+
+    # Start web dashboard (blocking)
+    import siem_dashboard
+    siem_dashboard.app.run(host="0.0.0.0", port=args.web_port, debug=False)
+
+if __name__ == "__main__":
+    main()</code></pre>
+
+    <!-- Testing -->
+    <h2>Testing Your SIEM</h2>
+    <p>Verify the entire pipeline works:</p>
+    <ul style="margin-left:var(--space-6);margin-bottom:var(--space-6);color:var(--color-text-secondary);">
+      <li><strong>Send test events:</strong> <code>curl -X POST http://localhost:8080 -d '{"event_type":"ssh","severity":"HIGH","message":"Failed password for root from 10.0.0.99","source":"test-host"}'</code></li>
+      <li><strong>Trigger brute force alert:</strong> Send 5+ SSH failed login events from the same IP within 5 minutes</li>
+      <li><strong>Verify dashboard:</strong> Open <code>http://localhost:5000</code> — events should appear in real-time</li>
+      <li><strong>Test syslog:</strong> Configure a real server to forward syslog to your SIEM's UDP port</li>
+      <li><strong>Database query:</strong> <code>sqlite3 siem_events.db "SELECT event_type, COUNT(*) FROM events GROUP BY event_type"</code></li>
+    </ul>
+
+    <!-- Extensions -->
+    <h2>Extension Ideas</h2>
+    <ul style="margin-left:var(--space-6);margin-bottom:var(--space-6);color:var(--color-text-secondary);">
+      <li><strong>Elasticsearch backend:</strong> Replace SQLite with Elasticsearch for production-scale log storage and full-text search</li>
+      <li><strong>MITRE ATT&amp;CK mapping:</strong> Tag each detection rule with the relevant MITRE technique (T1110, T1040, T1548)</li>
+      <li><strong>Alert actions:</strong> Add webhook integration — post alerts to Slack/Discord, send emails, or trigger automated response</li>
+      <li><strong>Sigma rules:</strong> Implement the Sigma rule format so your detection engine can consume community-maintained detection rules</li>
+      <li><strong>Threat hunting:</strong> Add an interactive query interface for SOC analysts to hunt for IoCs across historical data</li>
+    </ul>
+
+    <!-- Resources -->
+    <h2>Resources &amp; Next Steps</h2>
+    <div style="display:flex;flex-direction:column;gap:var(--space-2);margin-bottom:var(--space-8);">
+      <a class="resource-link" href="https://www.elastic.co/security" target="_blank" rel="noopener">
+        <span class="resource-link-icon">&#x1F50D;</span> Elastic Security — Enterprise SIEM (Inspiration)
+      </a>
+      <a class="resource-link" href="https://tryhackme.com/room/splunk101" target="_blank" rel="noopener">
+        <span class="resource-link-icon">&#x1F3AF;</span> TryHackMe: Splunk 101
+      </a>
+      <a class="resource-link" href="https://github.com/SigmaHQ/sigma" target="_blank" rel="noopener">
+        <span class="resource-link-icon">&#x1F4DC;</span> Sigma — Generic Signature Format for SIEM Rules
+      </a>
+      <a class="resource-link" href="https://attack.mitre.org/" target="_blank" rel="noopener">
+        <span class="resource-link-icon">&#x1F4D6;</span> MITRE ATT&amp;CK — Threat Techniques Reference
+      </a>
+    </div>
+
+    <!-- Cert Relevance -->
+    <div class="callout">
+      <div class="callout-title">&#x1F393; Cert Relevance</div>
+      <p>SIEM and security operations are central to <strong>CompTIA CySA+</strong> (log analysis, SIEM tools, threat detection) and <strong>CISSP Domain 7</strong> (security operations, investigations). This project directly prepares you for the <strong>Splunk Core Certified User</strong> and <strong>Elastic Certified Engineer</strong> exams. For <strong>CASP+</strong>, understanding SIEM architecture and detection engineering is a core competency. The hands-on experience with log parsing and detection rules is exactly what SOC analyst interviews test.</p>
+    </div>
+
+  </div>
+
+  <!-- JS -->
+  <script src="/assets/js/data.js"></script>
+  <script src="/assets/js/theme.js"></script>
+  <script src="/assets/js/components.js"></script>
+  <script src="/assets/js/progress.js"></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      document.body.prepend(renderNav());
+      document.body.appendChild(renderFooter());
+      const btnContainer = document.getElementById('progressBtn');
+      if (btnContainer) btnContainer.appendChild(renderProgressButton('siem-dashboard'));
+      initCopyButtons();
+    });
+  </script>
+</body>
+</html>

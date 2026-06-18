@@ -1,0 +1,542 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Network Traffic Analyzer — sec-projects</title>
+  <meta name="description" content="Analyze PCAP files to detect anomalies, visualize traffic patterns, and identify potential security incidents.">
+
+  <meta property="og:title" content="Network Traffic Analyzer — sec-projects">
+  <meta property="og:description" content="Analyze PCAP files to detect anomalies and visualize traffic patterns.">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://sec-projects.pages.dev/projects/network/traffic-analyzer.html">
+
+  <link rel="canonical" href="https://sec-projects.pages.dev/projects/network/traffic-analyzer.html">
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+  <link rel="stylesheet" href="/assets/css/theme.css">
+  <link rel="stylesheet" href="/assets/css/layout.css">
+  <link rel="stylesheet" href="/assets/css/components.css">
+</head>
+<body>
+  <div class="container" style="max-width:900px; margin: calc(var(--nav-height) + var(--space-8)) auto var(--space-8); padding: 0 var(--space-6);">
+
+    <div class="breadcrumbs">
+      <a href="/">Home</a>
+      <span class="breadcrumb-sep">/</span>
+      <a href="/?cat=network">Network Security</a>
+      <span class="breadcrumb-sep">/</span>
+      <span>Network Traffic Analyzer</span>
+    </div>
+
+    <div style="margin-bottom:var(--space-8);">
+      <div style="display:flex;align-items:center;gap:var(--space-4);flex-wrap:wrap;margin-bottom:var(--space-3);">
+        <span class="badge badge-intermediate">Intermediate</span>
+        <span style="color:var(--color-text-muted);font-size:var(--font-size-sm);">&#x23F1; 3-5 hours</span>
+      </div>
+      <h1 style="border-bottom:none;margin-bottom:var(--space-3);">Network Traffic Analyzer</h1>
+      <p style="font-size:var(--font-size-lg);color:var(--color-text-secondary);">Analyze PCAP files to detect anomalies, visualize traffic patterns, and identify potential security incidents.</p>
+      <div style="display:flex;flex-wrap:wrap;gap:var(--space-2);margin-top:var(--space-3);">
+        <span class="tag">python</span>
+        <span class="tag">scapy</span>
+        <span class="tag">data-viz</span>
+        <span class="tag">anomaly-detection</span>
+      </div>
+    </div>
+
+    <div id="progressBtn" style="margin-bottom:var(--space-8);"></div>
+
+    <h2>Learning Objectives</h2>
+    <ul style="margin-left:var(--space-6);margin-bottom:var(--space-6);color:var(--color-text-secondary);">
+      <li>Parse PCAP files and extract structured traffic metadata (flows, conversations, protocol stats)</li>
+      <li>Track bidirectional IP flows with timing, byte counts, and packet-per-second metrics</li>
+      <li>Detect anomalies using statistical baselining — z-scores on packet rates, bandwidth, and flow counts</li>
+      <li>Flag suspicious patterns: port scans, ICMP floods, asymmetric traffic, and DNS tunneling indicators</li>
+      <li>Generate JSON reports suitable for integration with SIEM or ticketing systems</li>
+    </ul>
+
+    <h2>Prerequisites</h2>
+    <ul style="margin-left:var(--space-6);margin-bottom:var(--space-6);color:var(--color-text-secondary);">
+      <li>Python 3.8+ with <code>scapy</code> installed</li>
+      <li>Sample PCAP files for testing (see Resources below)</li>
+      <li>Understanding of IP flows (5-tuple: src IP, dst IP, src port, dst port, protocol)</li>
+      <li>Familiarity with basic statistics (mean, standard deviation)</li>
+    </ul>
+
+    <div class="callout">
+      <div class="callout-title">&#x26A0; Ethics & Legal</div>
+      <p>Only analyze PCAP files you have authorization to inspect. Network traffic captures may contain PII, credentials, or sensitive business data. Handle capture files securely and delete them after analysis if they contain sensitive information.</p>
+    </div>
+
+    <h2>Step 1: PCAP Parser & Protocol Statistics</h2>
+    <p>Build the foundation — read a PCAP file and compute protocol distribution, top talkers, and port usage statistics the same way professional tools do.</p>
+
+    <pre><code>from scapy.all import rdpcap, IP, TCP, UDP, ICMP, DNS, Raw
+from collections import defaultdict, Counter
+import argparse
+import json
+import sys
+
+class PCAPAnalyzer:
+    """Load and analyze PCAP files for network forensics."""
+
+    def __init__(self):
+        self.packets = []
+        self.protocol_stats = Counter()
+        self.src_ip_stats = Counter()
+        self.dst_ip_stats = Counter()
+        self.port_stats = Counter()
+
+    def load(self, pcap_path):
+        """Load a PCAP file into memory."""
+        print(f"[*] Loading {pcap_path}...")
+        self.packets = rdpcap(pcap_path)
+        print(f"[+] Loaded {len(self.packets)} packets.")
+        return self
+
+    def analyze(self):
+        """Run all analysis passes over loaded packets."""
+        self.protocol_stats.clear()
+        self.src_ip_stats.clear()
+        self.dst_ip_stats.clear()
+        self.port_stats.clear()
+
+        for pkt in self.packets:
+            if IP not in pkt:
+                continue
+
+            self.src_ip_stats[pkt[IP].src] += 1
+            self.dst_ip_stats[pkt[IP].dst] += 1
+
+            if TCP in pkt:
+                self.protocol_stats["TCP"] += 1
+                self.port_stats[pkt[TCP].sport] += 1
+                self.port_stats[pkt[TCP].dport] += 1
+                # Check for HTTP by inspecting payload
+                if Raw in pkt:
+                    payload = bytes(pkt[Raw].load)
+                    if payload[:4] in (b"GET ", b"POST", b"HTTP", b"HEAD"):
+                        self.protocol_stats["HTTP"] += 1
+
+            elif UDP in pkt:
+                self.protocol_stats["UDP"] += 1
+                self.port_stats[pkt[UDP].sport] += 1
+                self.port_stats[pkt[UDP].dport] += 1
+                if DNS in pkt:
+                    self.protocol_stats["DNS"] += 1
+
+            elif ICMP in pkt:
+                self.protocol_stats["ICMP"] += 1
+
+        return self
+
+    def report(self):
+        """Print a formatted analysis report."""
+        print("\n" + "=" * 55)
+        print("  NETWORK TRAFFIC ANALYSIS REPORT")
+        print("=" * 55)
+        print(f"  Total packets: {len(self.packets):,}")
+
+        print(f"\n  --- Protocol Distribution ---")
+        for proto, count in self.protocol_stats.most_common():
+            pct = (count / len(self.packets)) * 100 if self.packets else 0
+            print(f"  {proto:<10} {count:>8}  ({pct:5.1f}%)")
+
+        print(f"\n  --- Top 10 Source IPs ---")
+        for ip, count in self.src_ip_stats.most_common(10):
+            print(f"  {ip:<18} {count:>8} packets")
+
+        print(f"\n  --- Top 10 Destination Ports ---")
+        for port, count in self.port_stats.most_common(10):
+            service = {80: "HTTP", 443: "HTTPS", 22: "SSH", 53: "DNS",
+                       25: "SMTP", 21: "FTP", 3389: "RDP"}.get(port, "")
+            print(f"  {port:<6} {service:<8} {count:>8} hits")
+
+    def to_json(self, filepath):
+        """Export analysis results to JSON."""
+        result = {
+            "total_packets": len(self.packets),
+            "protocols": dict(self.protocol_stats.most_common()),
+            "top_sources": dict(self.src_ip_stats.most_common(20)),
+            "top_ports": dict(self.port_stats.most_common(20))
+        }
+        with open(filepath, "w") as f:
+            json.dump(result, f, indent=2)
+        print(f"[+] Report exported to {filepath}")
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="PCAP Traffic Analyzer")
+    parser.add_argument("pcap", help="Path to PCAP file")
+    parser.add_argument("-o", "--output", help="Export JSON report to file")
+    args = parser.parse_args()
+
+    analyzer = PCAPAnalyzer()
+    analyzer.load(args.pcap).analyze().report()
+    if args.output:
+        analyzer.to_json(args.output)</code></pre>
+
+    <h2>Step 2: Flow Tracker</h2>
+    <p>Go beyond per-packet stats and track bidirectional flows. A "flow" is a communication session between two endpoints identified by the 5-tuple. Flow tracking reveals conversation-level patterns that per-packet analysis misses.</p>
+
+    <pre><code>import time
+from collections import defaultdict
+
+class FlowTracker:
+    """Track and analyze bidirectional IP flows from PCAP data."""
+
+    def __init__(self, timeout=300):
+        self.flows = {}
+        self.timeout = timeout  # seconds before a flow is considered expired
+
+    def build_flows(self, packets):
+        """Process packet list and build flow records."""
+        for pkt in packets:
+            if IP not in pkt:
+                continue
+
+            src = pkt[IP].src
+            dst = pkt[IP].dst
+            proto_num = pkt[IP].proto
+            packet_size = len(pkt)
+
+            # Determine ports
+            if TCP in pkt:
+                sport, dport = pkt[TCP].sport, pkt[TCP].dport
+                proto = "TCP"
+            elif UDP in pkt:
+                sport, dport = pkt[UDP].sport, pkt[UDP].dport
+                proto = "UDP"
+            else:
+                sport, dport = 0, 0
+                proto = f"IP/{proto_num}"
+
+            # Create bidirectional flow key (order-insensitive)
+            if (src, sport) <= (dst, dport):
+                flow_key = (src, sport, dst, dport, proto)
+            else:
+                flow_key = (dst, dport, src, sport, proto)
+
+            if flow_key not in self.flows:
+                self.flows[flow_key] = {
+                    "src": src, "dst": dst,
+                    "sport": sport, "dport": dport,
+                    "proto": proto,
+                    "packets": 0, "bytes": 0,
+                    "first_seen": None, "last_seen": None,
+                }
+
+            flow = self.flows[flow_key]
+            flow["packets"] += 1
+            flow["bytes"] += packet_size
+
+            # Use packet.time if available (from PCAP timestamp), else placeholder
+            pkt_time = float(pkt.time) if hasattr(pkt, "time") else 0
+            if flow["first_seen"] is None or pkt_time < flow["first_seen"]:
+                flow["first_seen"] = pkt_time
+            if flow["last_seen"] is None or pkt_time > flow["last_seen"]:
+                flow["last_seen"] = pkt_time
+
+        return self
+
+    def get_summary(self, top_n=20):
+        """Return sorted list of top flows by bytes transferred."""
+        sorted_flows = sorted(
+            self.flows.values(),
+            key=lambda f: f["bytes"],
+            reverse=True
+        )
+        return sorted_flows[:top_n]
+
+    def print_summary(self):
+        print(f"\n  --- Top Flows by Bytes ---")
+        print(f"  {'Source':<22} {'Destination':<22} {'Proto':<6} {'Packets':>8} {'Bytes':>12}")
+        print(f"  {'-'*22} {'-'*22} {'-'*6} {'-'*8} {'-'*12}")
+
+        for f in self.get_summary(15):
+            src_str = f"{f['src']}:{f['sport']}"
+            dst_str = f"{f['dst']}:{f['dport']}"
+            print(f"  {src_str:<22} {dst_str:<22} {f['proto']:<6} {f['packets']:>8} {f['bytes']:>12,}")
+
+    def detect_suspicious(self):
+        """Flag flows matching suspicious patterns."""
+        alerts = []
+        for key, flow in self.flows.items():
+            # High packet rate (if duration known)
+            if flow["last_seen"] and flow["first_seen"]:
+                duration = flow["last_seen"] - flow["first_seen"]
+                if duration > 0:
+                    pps = flow["packets"] / duration
+                    if pps > 1000:
+                        alerts.append({**flow, "reason": f"High packet rate: {pps:.0f} pps"})
+
+            # Large data transfer to unusual port
+            if flow["dport"] > 49151 and flow["bytes"] > 100_000:
+                alerts.append({**flow, "reason": f"Large transfer to ephemeral port {flow['dport']}"})
+
+        return alerts
+
+
+# Example usage
+if __name__ == "__main__":
+    from scapy.all import rdpcap
+    packets = rdpcap("sample.pcap")
+    tracker = FlowTracker()
+    tracker.build_flows(packets).print_summary()
+
+    alerts = tracker.detect_suspicious()
+    if alerts:
+        print(f"\n[!] {len(alerts)} suspicious flow(s) detected:")
+        for a in alerts:
+            print(f"    {a['src']}:{a['sport']} -> {a['dst']}:{a['dport']} — {a['reason']}")</code></pre>
+
+    <h2>Step 3: Statistical Anomaly Detection</h2>
+    <p>Use z-score analysis to detect outliers in packet rates, bytes-per-second, and flow counts. This is the foundation of network behavior anomaly detection (NBAD) used in commercial NIDS.</p>
+
+    <pre><code>import statistics
+from collections import deque
+
+class AnomalyDetector:
+    """Detect network traffic anomalies using statistical baselines."""
+
+    def __init__(self, window_size=100, threshold=3.0):
+        self.window_size = window_size
+        self.threshold = threshold  # z-score threshold
+
+        # Sliding windows for key metrics
+        self.pkt_rates = deque(maxlen=window_size)
+        self.byte_rates = deque(maxlen=window_size)
+        self.flow_counts = deque(maxlen=window_size)
+        self.protocol_ratios = defaultdict(lambda: deque(maxlen=window_size))
+
+    def record_interval(self, packets_in_interval, bytes_in_interval,
+                        flows_in_interval, protocol_dist, interval_sec=5):
+        """Record one observation interval."""
+        self.pkt_rates.append(packets_in_interval / interval_sec)
+        self.byte_rates.append(bytes_in_interval / interval_sec)
+        self.flow_counts.append(flows_in_interval)
+
+        total = sum(protocol_dist.values()) or 1
+        for proto, count in protocol_dist.items():
+            self.protocol_ratios[proto].append(count / total)
+
+    def _zscore(self, value, data):
+        """Calculate z-score: how many std devs from the mean."""
+        if len(data) < 10:
+            return 0
+        mean = statistics.mean(data)
+        stdev = statistics.stdev(data)
+        if stdev == 0:
+            return 0
+        return abs(value - mean) / stdev
+
+    def check(self, current_pkt_rate, current_byte_rate, current_flows,
+              current_protocol_dist):
+        """Check current metrics against baseline. Returns list of anomalies."""
+        anomalies = []
+
+        pkt_z = self._zscore(current_pkt_rate, self.pkt_rates)
+        if pkt_z > self.threshold:
+            anomalies.append({
+                "type": "packet_rate",
+                "z_score": round(pkt_z, 2),
+                "current": round(current_pkt_rate, 1),
+                "baseline_mean": round(statistics.mean(self.pkt_rates), 1),
+            })
+
+        byte_z = self._zscore(current_byte_rate, self.byte_rates)
+        if byte_z > self.threshold:
+            anomalies.append({
+                "type": "byte_rate",
+                "z_score": round(byte_z, 2),
+                "current": round(current_byte_rate / 1024, 1),
+                "unit": "KB/s",
+            })
+
+        flow_z = self._zscore(current_flows, self.flow_counts)
+        if flow_z > self.threshold:
+            anomalies.append({
+                "type": "flow_count",
+                "z_score": round(flow_z, 2),
+                "current": current_flows,
+            })
+
+        # Protocol ratio anomalies
+        total = sum(current_protocol_dist.values()) or 1
+        for proto, count in current_protocol_dist.items():
+            ratio = count / total
+            proto_z = self._zscore(ratio, self.protocol_ratios[proto])
+            if proto_z > self.threshold:
+                anomalies.append({
+                    "type": f"protocol_{proto}_ratio",
+                    "z_score": round(proto_z, 2),
+                    "ratio": round(ratio * 100, 1),
+                })
+
+        return anomalies
+
+    def is_ready(self):
+        """Baseline needs enough data to be statistically meaningful."""
+        return len(self.pkt_rates) >= 10
+
+
+# Simulated real-time analysis (use with live capture or chunked PCAP)
+if __name__ == "__main__":
+    import random
+    detector = AnomalyDetector()
+
+    # Build baseline with 50 normal intervals
+    print("[*] Building baseline (50 intervals of normal traffic)...")
+    for _ in range(50):
+        detector.record_interval(
+            packets_in_interval=random.randint(300, 700),
+            bytes_in_interval=random.randint(500_000, 2_000_000),
+            flows_in_interval=random.randint(10, 40),
+            protocol_dist={"TCP": random.randint(200, 500), "UDP": random.randint(50, 150)}
+        )
+
+    # Now test with an anomalous spike
+    print("[*] Testing anomaly — injecting high packet rate spike...")
+    result = detector.check(
+        current_pkt_rate=5000,   # spike!
+        current_byte_rate=1_000_000,
+        current_flows=30,
+        current_protocol_dist={"TCP": 40, "UDP": 10}
+    )
+
+    if result:
+        print(f"[!] {len(result)} anomaly(s) detected:")
+        for a in result:
+            print(f"    {a['type']}: z-score={a['z_score']}")
+    else:
+        print("    No anomalies detected.")</code></pre>
+
+    <h2>Step 4: Complete CLI Reporting Tool</h2>
+    <p>Wire everything together into a single command-line tool.</p>
+
+    <pre><code>#!/usr/bin/env python3
+"""Complete network traffic analyzer — PCAP analysis with anomaly detection."""
+
+import argparse
+import json
+from scapy.all import rdpcap
+
+def main():
+    parser = argparse.ArgumentParser(description="Network Traffic Analyzer")
+    parser.add_argument("pcap", help="Path to PCAP file")
+    parser.add_argument("-o", "--output", help="Export JSON report to file")
+    parser.add_argument("--flows", type=int, default=20, help="Top N flows to display")
+    parser.add_argument("--alerts", action="store_true", help="Show suspicious flow alerts")
+    args = parser.parse_args()
+
+    print(f"[*] Analyzing: {args.pcap}\n")
+
+    # Load packets
+    packets = rdpcap(args.pcap)
+    print(f"[+] Loaded {len(packets):,} packets")
+
+    # Analyze
+    analyzer = PCAPAnalyzer()
+    analyzer.packets = packets
+    analyzer.analyze()
+    analyzer.report()
+
+    # Flows
+    tracker = FlowTracker()
+    tracker.build_flows(packets)
+    tracker.print_summary()
+
+    # Suspicious alerts
+    if args.alerts:
+        alerts = tracker.detect_suspicious()
+        if alerts:
+            print(f"\n[!] {len(alerts)} suspicious flow alert(s):")
+            for a in alerts[:10]:
+                print(f"    {a['src']}:{a['sport']} -> {a['dst']}:{a['dport']} "
+                      f"— {a['reason']} ({a['bytes']:,} bytes)")
+        else:
+            print("\n[+] No suspicious flows detected.")
+
+    # Export
+    if args.output:
+        report = {
+            "file": args.pcap,
+            "total_packets": len(packets),
+            "protocols": dict(analyzer.protocol_stats.most_common()),
+            "top_flows": tracker.get_summary(args.flows),
+            "suspicious": tracker.detect_suspicious(),
+        }
+        with open(args.output, "w") as f:
+            json.dump(report, f, indent=2, default=str)
+        print(f"\n[+] Full report exported to {args.output}")
+
+if __name__ == "__main__":
+    main()</code></pre>
+
+    <h2>Testing Your Analyzer</h2>
+    <p>Test with real PCAP files from trusted sources:</p>
+    <ul style="margin-left:var(--space-6);margin-bottom:var(--space-6);color:var(--color-text-secondary);">
+      <li><strong>Wireshark Sample Captures:</strong> <code>https://wiki.wireshark.org/SampleCaptures</code> — the HTTP and DNS captures are great for testing protocol stats</li>
+      <li><strong>Malware Traffic Analysis:</strong> <code>https://www.malware-traffic-analysis.net/</code> — contains real malicious traffic PCAPs to test your anomaly detection</li>
+      <li><strong>Generate your own:</strong> Run <code>tcpdump -w test.pcap -c 500</code> while browsing normally, then analyze it</li>
+    </ul>
+
+    <pre><code># Download a sample PCAP
+curl -O https://wiki.wireshark.org/SampleCaptures?action=AttachFile&do=get&target=http.cap
+
+# Run analyzer
+python analyzer.py http.cap --flows 30 --alerts -o report.json</code></pre>
+
+    <h2>Extension Ideas</h2>
+    <ul style="margin-left:var(--space-6);margin-bottom:var(--space-6);color:var(--color-text-secondary);">
+      <li>Add geolocation enrichment — resolve IPs to countries/ASNs using the MaxMind GeoLite2 database</li>
+      <li>Implement Beacon detection for C2 traffic — flag periodic connections with low jitter (common in malware)</li>
+      <li>Build a Matplotlib/Plotly dashboard that renders protocol pie charts and top-talker bar graphs</li>
+      <li>Add JA3/JA4 TLS fingerprint extraction to identify malicious TLS client patterns</li>
+      <li>Integrate with VirusTotal API to check destination IPs against threat intelligence feeds</li>
+    </ul>
+
+    <h2>Resources & Next Steps</h2>
+    <div style="display:flex;flex-direction:column;gap:var(--space-2);margin-bottom:var(--space-8);">
+      <a class="resource-link" href="https://www.malware-traffic-analysis.net/" target="_blank" rel="noopener">
+        <span class="resource-link-icon">&#x1F4E1;</span> Malware Traffic Analysis (Real PCAP Exercises)
+      </a>
+      <a class="resource-link" href="https://tryhackme.com/room/wireshark" target="_blank" rel="noopener">
+        <span class="resource-link-icon">&#x1F3AF;</span> TryHackMe: Wireshark Room
+      </a>
+      <a class="resource-link" href="https://scapy.readthedocs.io/en/latest/usage.html" target="_blank" rel="noopener">
+        <span class="resource-link-icon">&#x1F4D6;</span> Scapy Usage Guide
+      </a>
+      <a class="resource-link" href="https://wiki.wireshark.org/SampleCaptures" target="_blank" rel="noopener">
+        <span class="resource-link-icon">&#x1F4C1;</span> Wireshark Sample Captures
+      </a>
+      <a class="resource-link" href="https://en.wikipedia.org/wiki/NetFlow" target="_blank" rel="noopener">
+        <span class="resource-link-icon">&#x1F4DC;</span> NetFlow Protocol Overview
+      </a>
+    </div>
+
+    <div class="callout">
+      <div class="callout-title">&#x1F393; Cert Relevance</div>
+      <p>Flow analysis and anomaly detection map directly to the <strong>CompTIA Security+</strong> (incident response & traffic analysis) and <strong>CySA+</strong> (behavioral analytics) domains. PCAP forensics is tested heavily on the <strong>GCFA</strong> and <strong>GCIH</strong> exams. This project also builds the analytical foundation needed for <strong>eJPT</strong> and <strong>PNPT</strong> practical assessments where you must analyze packet captures to understand attack paths.</p>
+    </div>
+
+  </div>
+
+  <script src="/assets/js/data.js"></script>
+  <script src="/assets/js/theme.js"></script>
+  <script src="/assets/js/components.js"></script>
+  <script src="/assets/js/progress.js"></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      document.body.prepend(renderNav());
+      document.body.appendChild(renderFooter());
+      const btnContainer = document.getElementById('progressBtn');
+      if (btnContainer) btnContainer.appendChild(renderProgressButton('traffic-analyzer'));
+      initCopyButtons();
+    });
+  </script>
+</body>
+</html>

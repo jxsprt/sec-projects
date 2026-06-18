@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AES-256 File Encryptor — sec-projects</title>
+  <meta name="description" content="Implement AES-256-GCM file encryption with proper key derivation, authentication tags, and secure key storage in Python.">
+
+  <meta property="og:title" content="AES-256 File Encryptor — sec-projects">
+  <meta property="og:description" content="Implement AES-256-GCM file encryption with proper key derivation and authentication.">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://sec-projects.pages.dev/projects/crypto/aes-file-encryptor.html">
+
+  <link rel="canonical" href="https://sec-projects.pages.dev/projects/crypto/aes-file-encryptor.html">
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+  <link rel="stylesheet" href="/assets/css/theme.css">
+  <link rel="stylesheet" href="/assets/css/layout.css">
+  <link rel="stylesheet" href="/assets/css/components.css">
+</head>
+<body>
+  <div class="container" style="max-width:900px; margin: calc(var(--nav-height) + var(--space-8)) auto var(--space-8); padding: 0 var(--space-6);">
+
+    <!-- Breadcrumbs -->
+    <div class="breadcrumbs">
+      <a href="/">Home</a>
+      <span class="breadcrumb-sep">/</span>
+      <a href="/?cat=crypto">Cryptography</a>
+      <span class="breadcrumb-sep">/</span>
+      <span>AES-256 File Encryptor</span>
+    </div>
+
+    <!-- Header -->
+    <div style="margin-bottom:var(--space-8);">
+      <div style="display:flex;align-items:center;gap:var(--space-4);flex-wrap:wrap;margin-bottom:var(--space-3);">
+        <span class="badge badge-intermediate">Intermediate</span>
+        <span style="color:var(--color-text-muted);font-size:var(--font-size-sm);">&#x23F1; 2-3 hours</span>
+      </div>
+      <h1 style="border-bottom:none;margin-bottom:var(--space-3);">AES-256 File Encryptor</h1>
+      <p style="font-size:var(--font-size-lg);color:var(--color-text-secondary);">Implement AES-256-GCM file encryption with proper key derivation, authentication, and secure key storage.</p>
+      <div style="display:flex;flex-wrap:wrap;gap:var(--space-2);margin-top:var(--space-3);">
+        <span class="tag">python</span>
+        <span class="tag">aes</span>
+        <span class="tag">cryptography</span>
+        <span class="tag">key-management</span>
+      </div>
+    </div>
+
+    <!-- Progress Button -->
+    <div id="progressBtn" style="margin-bottom:var(--space-8);"></div>
+
+    <!-- Learning Objectives -->
+    <h2>Learning Objectives</h2>
+    <ul style="margin-left:var(--space-6);margin-bottom:var(--space-6);color:var(--color-text-secondary);">
+      <li>Understand symmetric encryption and why AES-256 is the industry standard</li>
+      <li>Learn the difference between AES modes (ECB, CBC, GCM) and why <strong>never use ECB</strong></li>
+      <li>Implement authenticated encryption with AES-GCM to prevent tampering</li>
+      <li>Derive strong encryption keys from passwords using PBKDF2 with proper salting</li>
+      <li>Handle file I/O safely — encrypt large files in chunks without loading everything into memory</li>
+    </ul>
+
+    <!-- Prerequisites -->
+    <h2>Prerequisites</h2>
+    <ul style="margin-left:var(--space-6);margin-bottom:var(--space-6);color:var(--color-text-secondary);">
+      <li>Python 3.8+ with the <code>cryptography</code> library installed (<code>pip install cryptography</code>)</li>
+      <li>Basic understanding of symmetric vs asymmetric encryption</li>
+      <li>Familiarity with Python file I/O and binary data handling</li>
+      <li>Conceptual understanding of hashing and key derivation</li>
+    </ul>
+
+    <!-- Step 1 -->
+    <h2>Step 1: Key Derivation with PBKDF2</h2>
+    <p>Never use passwords directly as encryption keys — they're low-entropy. Instead, derive a strong 256-bit key from the password using PBKDF2 with a random salt and high iteration count.</p>
+
+    <pre><code>import os
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.backends import default_backend
+
+def derive_key(password: str, salt: bytes = None, iterations: int = 600_000) -> tuple:
+    """Derive a 256-bit AES key from a password using PBKDF2."""
+    if salt is None:
+        salt = os.urandom(16)  # 128-bit random salt
+
+    kdf = PBKDF2HMAC(
+        algorithm=hashes.SHA256(),
+        length=32,          # 256-bit key for AES-256
+        salt=salt,
+        iterations=iterations,
+        backend=default_backend()
+    )
+    key = kdf.derive(password.encode('utf-8'))
+    return key, salt
+
+# Example usage
+password = "correct-horse-battery-staple"
+key, salt = derive_key(password)
+print(f"Derived key: {key.hex()}")
+print(f"Salt: {salt.hex()}")</code></pre>
+
+    <p><strong>Key concepts:</strong> PBKDF2 makes brute-force attacks expensive. Each derivation takes ~0.1s at 600K iterations — negligible for legitimate use, devastating for attackers. The salt ensures identical passwords produce different keys.</p>
+
+    <!-- Step 2 -->
+    <h2>Step 2: Encrypt a File with AES-256-GCM</h2>
+    <p>AES-GCM provides both <strong>confidentiality</strong> (encryption) and <strong>integrity</strong> (authentication). The authentication tag prevents tampering — if even one byte is modified, decryption will fail.</p>
+
+    <pre><code>import os
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+def encrypt_file(input_path: str, output_path: str, password: str) -> None:
+    """Encrypt a file using AES-256-GCM."""
+
+    # Derive key from password
+    key, salt = derive_key(password)
+
+    # Generate a random 96-bit nonce (IV) — critical: NEVER reuse a nonce with the same key!
+    nonce = os.urandom(12)
+
+    # Read plaintext
+    with open(input_path, 'rb') as f:
+        plaintext = f.read()
+
+    # Encrypt
+    aesgcm = AESGCM(key)
+    # Include salt + nonce as associated data (authenticated but not encrypted)
+    associated_data = salt + nonce
+    ciphertext = aesgcm.encrypt(nonce, plaintext, associated_data)
+
+    # Write: salt (16) + nonce (12) + ciphertext (includes 16-byte tag)
+    with open(output_path, 'wb') as f:
+        f.write(salt)       # 16 bytes
+        f.write(nonce)      # 12 bytes
+        f.write(ciphertext) # plaintext + 16-byte authentication tag
+
+    print(f"Encrypted '{input_path}' -> '{output_path}'")
+    print(f"  Original size: {len(plaintext)} bytes")
+    print(f"  Encrypted size: {len(ciphertext) + 28} bytes (+ salt/nonce overhead)")</code></pre>
+
+    <p><strong>Critical detail:</strong> The nonce (number used once) must be unique per encryption with the same key. Reusing a nonce with GCM <em>catastrophically</em> breaks security — an attacker can recover the authentication key and forge messages. We generate a random 96-bit nonce; at 2<sup>96</sup> possible values, collisions are astronomically unlikely.</p>
+
+    <!-- Step 3 -->
+    <h2>Step 3: Decrypt the File</h2>
+    <p>Decryption reads the salt and nonce from the file header, re-derives the key, and attempts decryption. If the authentication tag doesn't match, the file was tampered with.</p>
+
+    <pre><code>from cryptography.exceptions import InvalidTag
+
+def decrypt_file(input_path: str, output_path: str, password: str) -> bool:
+    """Decrypt a file encrypted with AES-256-GCM. Returns True on success."""
+
+    with open(input_path, 'rb') as f:
+        salt = f.read(16)    # First 16 bytes
+        nonce = f.read(12)  # Next 12 bytes
+        ciphertext = f.read()  # Rest (includes 16-byte tag appended by GCM)
+
+    if len(salt) != 16 or len(nonce) != 12:
+        print("Error: Invalid encrypted file format")
+        return False
+
+    # Re-derive the same key from the password + stored salt
+    key, _ = derive_key(password, salt)
+
+    # Decrypt
+    aesgcm = AESGCM(key)
+    associated_data = salt + nonce
+
+    try:
+        plaintext = aesgcm.decrypt(nonce, ciphertext, associated_data)
+    except InvalidTag:
+        print("Error: Decryption failed — wrong password or file was tampered with!")
+        return False
+
+    with open(output_path, 'wb') as f:
+        f.write(plaintext)
+
+    print(f"Decrypted '{input_path}' -> '{output_path}'")
+    print(f"  Decrypted size: {len(plaintext)} bytes")
+    return True</code></pre>
+
+    <p>The <code>InvalidTag</code> exception is your integrity guarantee. If it fires, you know definitively that either the password is wrong or the ciphertext was modified — GCM makes no distinction between the two, which is a security feature (prevents oracle attacks).</p>
+
+    <!-- Step 4 -->
+    <h2>Step 4: Build the CLI Interface</h2>
+    <p>Wrap everything into a usable command-line tool with <code>argparse</code>. Support both encrypt and decrypt modes with clean error handling.</p>
+
+    <pre><code>import argparse
+import sys
+import os
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="AES-256-GCM File Encryptor/Decryptor"
+    )
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    # Encrypt subcommand
+    enc_parser = subparsers.add_parser("encrypt", help="Encrypt a file")
+    enc_parser.add_argument("input", help="Input file to encrypt")
+    enc_parser.add_argument("-o", "--output", help="Output file (default: input.enc)")
+    enc_parser.add_argument("-p", "--password", help="Encryption password (will prompt if omitted)")
+
+    # Decrypt subcommand
+    dec_parser = subparsers.add_parser("decrypt", help="Decrypt a file")
+    dec_parser.add_argument("input", help="Input file to decrypt")
+    dec_parser.add_argument("-o", "--output", help="Output file (default: strips .enc)")
+    dec_parser.add_argument("-p", "--password", help="Decryption password (will prompt if omitted)")
+
+    args = parser.parse_args()
+
+    # Secure password input
+    if args.password:
+        password = args.password
+        print("Warning: Passing password on command line is insecure (visible in shell history)")
+    else:
+        import getpass
+        password = getpass.getpass("Password: ")
+
+    if args.command == "encrypt":
+        output = args.output or args.input + ".enc"
+        if os.path.exists(output):
+            resp = input(f"'{output}' already exists. Overwrite? [y/N] ")
+            if resp.lower() != 'y':
+                sys.exit(0)
+        encrypt_file(args.input, output, password)
+
+    elif args.command == "decrypt":
+        output = args.output or args.input.replace(".enc", "")
+        success = decrypt_file(args.input, output, password)
+        if not success:
+            sys.exit(1)
+
+if __name__ == "__main__":
+    main()</code></pre>
+
+    <!-- Testing -->
+    <h2>Testing Your Encryptor</h2>
+    <p>Verify your implementation with these tests:</p>
+    <ul style="margin-left:var(--space-6);margin-bottom:var(--space-6);color:var(--color-text-secondary);">
+      <li><strong>Round-trip test:</strong> Encrypt a file, decrypt it, and verify the original matches with <code>sha256sum</code></li>
+      <li><strong>Wrong password test:</strong> Try decrypting with the wrong password — you should get an <code>InvalidTag</code> error</li>
+      <li><strong>Tamper test:</strong> Flip a byte in the encrypted file and try to decrypt — should fail</li>
+      <li><strong>Nonce uniqueness:</strong> Encrypt the same file twice — outputs should be completely different due to random nonces</li>
+      <li><strong>Large file test:</strong> Try a 100MB+ file (consider streaming for production use)</li>
+    </ul>
+
+    <pre><code># Test round-trip
+echo "Super secret data" > test.txt
+python aes_encryptor.py encrypt test.txt -o test.txt.enc
+python aes_encryptor.py decrypt test.txt.enc -o test_decrypted.txt
+diff test.txt test_decrypted.txt && echo "SUCCESS: Files match"</code></pre>
+
+    <!-- Extensions -->
+    <h2>Extension Ideas</h2>
+    <ul style="margin-left:var(--space-6);margin-bottom:var(--space-6);color:var(--color-text-secondary);">
+      <li><strong>Streaming encryption:</strong> Handle multi-GB files by encrypting in 64KB chunks (GCM supports this with incremental nonce construction)</li>
+      <li><strong>Directory encryption:</strong> Recursively encrypt entire folders, preserving directory structure in the encrypted output</li>
+      <li><strong>Key file support:</strong> Allow using a key file (like SSH keys) instead of a password for automated/headless use</li>
+      <li><strong>Argon2 upgrade:</strong> Replace PBKDF2 with Argon2id for memory-hard key derivation (resists GPU/ASIC attacks)</li>
+      <li><strong>GUI wrapper:</strong> Build a simple Tkinter or web interface for non-technical users</li>
+    </ul>
+
+    <!-- Resources -->
+    <h2>Resources &amp; Next Steps</h2>
+    <div style="display:flex;flex-direction:column;gap:var(--space-2);margin-bottom:var(--space-8);">
+      <a class="resource-link" href="https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.197.pdf" target="_blank" rel="noopener">
+        <span class="resource-link-icon">&#x1F4D6;</span> NIST FIPS 197 — AES Standard
+      </a>
+      <a class="resource-link" href="https://cryptography.io/en/latest/hazmat/primitives/symmetric-encryption/" target="_blank" rel="noopener">
+        <span class="resource-link-icon">&#x1F4D8;</span> Python Cryptography: Symmetric Encryption
+      </a>
+      <a class="resource-link" href="https://csrc.nist.gov/publications/detail/sp/800-38d/final" target="_blank" rel="noopener">
+        <span class="resource-link-icon">&#x1F4DC;</span> NIST SP 800-38D — GCM Mode Specification
+      </a>
+      <a class="resource-link" href="https://tryhackme.com/room/cryptographyintro" target="_blank" rel="noopener">
+        <span class="resource-link-icon">&#x1F3AF;</span> TryHackMe: Cryptography Intro
+      </a>
+    </div>
+
+    <!-- Cert Relevance -->
+    <div class="callout">
+      <div class="callout-title">&#x1F393; Cert Relevance</div>
+      <p>This project directly maps to cryptography objectives on <strong>CompTIA Security+</strong> (encryption algorithms, hashing, key management) and <strong>CISSP Domain 3</strong> (cryptography, PKI, key lifecycle). Understanding AES-GCM internals gives you a strong edge for the <strong>OSCP</strong> exam where encrypted payload handling and crypto misconfigurations are common attack vectors.</p>
+    </div>
+
+  </div>
+
+  <!-- JS -->
+  <script src="/assets/js/data.js"></script>
+  <script src="/assets/js/theme.js"></script>
+  <script src="/assets/js/components.js"></script>
+  <script src="/assets/js/progress.js"></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      document.body.prepend(renderNav());
+      document.body.appendChild(renderFooter());
+      const btnContainer = document.getElementById('progressBtn');
+      if (btnContainer) btnContainer.appendChild(renderProgressButton('aes-file-encryptor'));
+      initCopyButtons();
+    });
+  </script>
+</body>
+</html>

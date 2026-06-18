@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Encrypted File Vault — sec-projects</title>
+  <meta name="description" content="Build a personal file vault that encrypts/decrypts files using AES-256 with a password-derived key.">
+
+  <meta property="og:title" content="Encrypted File Vault — sec-projects">
+  <meta property="og:description" content="Encrypt and decrypt files with AES-256-GCM — learn authenticated encryption.">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://sec-projects.pages.dev/projects/fundamentals/encrypted-file-vault.html">
+
+  <link rel="canonical" href="https://sec-projects.pages.dev/projects/fundamentals/encrypted-file-vault.html">
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+  <link rel="stylesheet" href="/assets/css/theme.css">
+  <link rel="stylesheet" href="/assets/css/layout.css">
+  <link rel="stylesheet" href="/assets/css/components.css">
+</head>
+<body>
+  <div class="container" style="max-width:900px; margin: calc(var(--nav-height) + var(--space-8)) auto var(--space-8); padding: 0 var(--space-6);">
+
+    <div class="breadcrumbs">
+      <a href="/">Home</a>
+      <span class="breadcrumb-sep">/</span>
+      <a href="/?cat=fundamentals">Fundamentals</a>
+      <span class="breadcrumb-sep">/</span>
+      <span>Encrypted File Vault</span>
+    </div>
+
+    <div style="margin-bottom:var(--space-8);">
+      <div style="display:flex;align-items:center;gap:var(--space-4);flex-wrap:wrap;margin-bottom:var(--space-3);">
+        <span class="badge badge-beginner">Beginner</span>
+        <span style="color:var(--color-text-muted);font-size:var(--font-size-sm);">&#x23F1; 2-4 hours</span>
+      </div>
+      <h1 style="border-bottom:none;margin-bottom:var(--space-3);">Encrypted File Vault</h1>
+      <p style="font-size:var(--font-size-lg);color:var(--color-text-secondary);">Build a personal file vault that encrypts/decrypts files using AES-256 with a password-derived key.</p>
+      <div style="display:flex;flex-wrap:wrap;gap:var(--space-2);margin-top:var(--space-3);">
+        <span class="tag">python</span>
+        <span class="tag">aes</span>
+        <span class="tag">cryptography</span>
+      </div>
+    </div>
+
+    <div id="progressBtn" style="margin-bottom:var(--space-8);"></div>
+
+    <h2>Learning Objectives</h2>
+    <ul style="margin-left:var(--space-6);margin-bottom:var(--space-6);color:var(--color-text-secondary);">
+      <li>Understand symmetric encryption: how AES-256-GCM provides both <strong>confidentiality</strong> and <strong>authenticity</strong></li>
+      <li>Learn key derivation: turning a human password into a strong cryptographic key using PBKDF2</li>
+      <li>Grasp the role of salt, nonce (IV), and authentication tags in preventing replay and tampering attacks</li>
+      <li>Design a file format that stores encrypted data + metadata (salt, nonce, tag) for reliable decryption</li>
+      <li>Understand <em>why</em> ECB mode is dangerous and GCM is the modern standard</li>
+    </ul>
+
+    <h2>Prerequisites</h2>
+    <ul style="margin-left:var(--space-6);margin-bottom:var(--space-6);color:var(--color-text-secondary);">
+      <li>Python 3.8+ installed</li>
+      <li><code>pip install cryptography</code> (the <code>cryptography</code> library, not the built-in module)</li>
+      <li>Basic understanding of what encryption does (plaintext → ciphertext)</li>
+      <li>No prior cryptography knowledge required — this project teaches it</li>
+    </ul>
+
+    <div class="callout">
+      <div class="callout-title">&#x26A0; Important Security Note</div>
+      <p>This project is for <strong>educational purposes</strong>. Do not roll your own crypto for production systems. The <code>cryptography</code> library used here exposes well-audited primitives correctly, but file format design and key management still require careful review before real-world use.</p>
+    </div>
+
+    <h2>Step 1: Install Dependencies &amp; Understand the Crypto Stack</h2>
+    <p>Install the <code>cryptography</code> library — this gives us AES-GCM and PBKDF2 with safe defaults.</p>
+
+    <pre><code>pip install cryptography
+
+# Verify installation
+python -c "from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes; print('Ready')"</code></pre>
+
+    <p>We'll use three cryptographic primitives:</p>
+    <ul style="margin-left:var(--space-6);margin-bottom:var(--space-6);color:var(--color-text-secondary);">
+      <li><strong>PBKDF2-HMAC-SHA256</strong> — turns a password into a 256-bit key (100,000 iterations)</li>
+      <li><strong>AES-256-GCM</strong> — encrypts data AND produces an authentication tag</li>
+      <li><strong>os.urandom</strong> — generates cryptographically secure random salt and nonce</li>
+    </ul>
+
+    <h2>Step 2: Key Derivation with PBKDF2</h2>
+    <p>Never use a password directly as an encryption key. PBKDF2 applies many iterations of a hash function to make brute-force attacks computationally expensive.</p>
+
+    <pre><code>import os
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+from cryptography.hazmat.backends import default_backend
+
+def derive_key(password: str, salt: bytes = None) -> tuple:
+    """Derive a 256-bit AES key from a password using PBKDF2."""
+    if salt is None:
+        salt = os.urandom(16)  # 128-bit random salt
+
+    kdf = PBKDF2HMAC(
+        algorithm=hashes.SHA256(),
+        length=32,              # 256-bit key for AES-256
+        salt=salt,
+        iterations=100_000,     # OWASP recommended minimum
+        backend=default_backend()
+    )
+    key = kdf.derive(password.encode('utf-8'))
+    return key, salt</code></pre>
+
+    <p><strong>Why 100,000 iterations?</strong> Each additional iteration doubles the work an attacker must do. At 100,000 iterations, a single password guess takes ~0.1s on modern hardware — trivially fast for legitimate use, devastating for brute-force attacks.</p>
+
+    <h2>Step 3: AES-256-GCM Encryption &amp; Decryption</h2>
+    <p>GCM (Galois/Counter Mode) is an <em>authenticated encryption</em> mode. It encrypts the data AND produces an authentication tag. If anyone tampers with the ciphertext, decryption fails — you can trust the output.</p>
+
+    <pre><code>import os
+import struct
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+
+MAGIC = b'EFV1'  # Encrypted File Vault v1 — format identifier
+
+def encrypt_file(input_path: str, password: str) -> str:
+    """Encrypt a file with AES-256-GCM. Returns path to .enc file."""
+    key, salt = derive_key(password)
+    nonce = os.urandom(12)  # 96-bit nonce for GCM
+
+    # Read plaintext
+    with open(input_path, 'rb') as f:
+        plaintext = f.read()
+
+    # Encrypt
+    cipher = Cipher(algorithms.AES(key), modes.GCM(nonce),
+                    backend=default_backend())
+    encryptor = cipher.encryptor()
+    ciphertext = encryptor.update(plaintext) + encryptor.finalize()
+    tag = encryptor.tag  # 16-byte authentication tag
+
+    # Write encrypted file with header
+    output_path = input_path + '.enc'
+    with open(output_path, 'wb') as f:
+        f.write(MAGIC)                    # 4 bytes: format magic
+        f.write(struct.pack('>I', 16))    # 4 bytes: salt length
+        f.write(salt)                     # 16 bytes: salt
+        f.write(struct.pack('>I', 12))    # 4 bytes: nonce length
+        f.write(nonce)                    # 12 bytes: nonce
+        f.write(struct.pack('>I', 16))    # 4 bytes: tag length
+        f.write(tag)                      # 16 bytes: auth tag
+        f.write(ciphertext)               # remainder: encrypted data
+
+    print(f"Encrypted: {input_path} → {output_path}")
+    return output_path
+
+def decrypt_file(enc_path: str, password: str) -> str:
+    """Decrypt an AES-256-GCM encrypted file. Returns path to decrypted file."""
+    with open(enc_path, 'rb') as f:
+        magic = f.read(4)
+        if magic != MAGIC:
+            raise ValueError("Not an Encrypted File Vault file (bad magic)")
+
+        salt_len = struct.unpack('>I', f.read(4))[0]
+        salt = f.read(salt_len)
+
+        nonce_len = struct.unpack('>I', f.read(4))[0]
+        nonce = f.read(nonce_len)
+
+        tag_len = struct.unpack('>I', f.read(4))[0]
+        tag = f.read(tag_len)
+
+        ciphertext = f.read()
+
+    # Re-derive key from password + stored salt
+    key, _ = derive_key(password, salt)
+
+    # Decrypt
+    cipher = Cipher(algorithms.AES(key), modes.GCM(nonce, tag),
+                    backend=default_backend())
+    decryptor = cipher.decryptor()
+
+    try:
+        plaintext = decryptor.update(ciphertext) + decryptor.finalize()
+    except Exception:
+        raise ValueError("Decryption failed — wrong password or corrupted file")
+
+    output_path = enc_path.replace('.enc', '.dec')
+    with open(output_path, 'wb') as f:
+        f.write(plaintext)
+
+    print(f"Decrypted: {enc_path} → {output_path}")
+    return output_path</code></pre>
+
+    <p><strong>File format design:</strong> The header stores salt, nonce, and tag with length prefixes. This is self-describing — you can decrypt without any side-channel metadata. The MAGIC bytes prevent accidentally feeding the wrong file type to the decryption function.</p>
+
+    <h2>Step 4: Command-Line Interface</h2>
+    <p>Wrap the crypto functions in a user-friendly CLI with secure password input.</p>
+
+    <pre><code>import argparse
+import getpass
+import sys
+from pathlib import Path
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Encrypted File Vault — AES-256-GCM file encryption"
+    )
+    sub = parser.add_subparsers(dest="cmd", help="Commands")
+
+    enc = sub.add_parser("encrypt", help="Encrypt a file")
+    enc.add_argument("file", help="File to encrypt")
+
+    dec = sub.add_parser("decrypt", help="Decrypt a file")
+    dec.add_argument("file", help="File to decrypt (.enc)")
+
+    args = parser.parse_args()
+
+    if args.cmd == "encrypt":
+        if not Path(args.file).exists():
+            print(f"Error: '{args.file}' not found")
+            sys.exit(1)
+
+        pwd = getpass.getpass("Encryption password: ")
+        confirm = getpass.getpass("Confirm password: ")
+        if pwd != confirm:
+            print("Passwords do not match")
+            sys.exit(1)
+
+        try:
+            encrypt_file(args.file, pwd)
+        except Exception as e:
+            print(f"Encryption failed: {e}")
+
+    elif args.cmd == "decrypt":
+        if not Path(args.file).exists():
+            print(f"Error: '{args.file}' not found")
+            sys.exit(1)
+
+        pwd = getpass.getpass("Decryption password: ")
+        try:
+            decrypt_file(args.file, pwd)
+        except ValueError as e:
+            print(f"Decryption failed: {e}")
+            sys.exit(1)
+
+    else:
+        parser.print_help()
+
+if __name__ == "__main__":
+    main()</code></pre>
+
+    <h2>Testing Your Vault</h2>
+    <p>Verify the full encrypt → decrypt → integrity cycle:</p>
+    <pre><code># Create a test file
+echo "TOP SECRET: The launch code is 4-8-15-16-23-42" > secret.txt
+
+# Encrypt
+python vault.py encrypt secret.txt
+# → secret.txt.enc created
+
+# Check the encrypted file — should look like random bytes
+xxd secret.txt.enc | head -5
+
+# Decrypt
+python vault.py decrypt secret.txt.enc
+# → secret.txt.dec created
+
+# Verify integrity
+diff secret.txt secret.txt.dec
+# (should produce no output — files are identical)</code></pre>
+
+    <h2>Extension Ideas</h2>
+    <ul style="margin-left:var(--space-6);margin-bottom:var(--space-6);color:var(--color-text-secondary);">
+      <li>Add <strong>directory encryption</strong>: tar + encrypt a whole folder tree</li>
+      <li>Implement <strong>Argon2id</strong> instead of PBKDF2 for memory-hard key derivation</li>
+      <li>Add <strong>public-key (RSA) encryption</strong> so others can encrypt files for you without sharing a password</li>
+      <li>Build a <strong>GUI</strong> with PyQt or Tkinter with drag-and-drop encryption</li>
+      <li>Add <strong>secure deletion</strong> — overwrite the original plaintext file after encryption</li>
+    </ul>
+
+    <h2>Resources &amp; Next Steps</h2>
+    <div style="display:flex;flex-direction:column;gap:var(--space-2);margin-bottom:var(--space-8);">
+      <a class="resource-link" href="https://cryptography.io/" target="_blank" rel="noopener">
+        <span class="resource-link-icon">&#x1F4D8;</span> Python Cryptography Library — Official Docs
+      </a>
+      <a class="resource-link" href="https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.197.pdf" target="_blank" rel="noopener">
+        <span class="resource-link-icon">&#x1F4DC;</span> NIST FIPS 197 — AES Standard
+      </a>
+      <a class="resource-link" href="https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html" target="_blank" rel="noopener">
+        <span class="resource-link-icon">&#x1F6E1;</span> OWASP Password Storage Cheat Sheet
+      </a>
+      <a class="resource-link" href="https://tryhackme.com/room/cryptographyintro" target="_blank" rel="noopener">
+        <span class="resource-link-icon">&#x1F3AF;</span> TryHackMe: Cryptography Intro
+      </a>
+    </div>
+
+    <div class="callout">
+      <div class="callout-title">&#x1F393; Cert Relevance</div>
+      <p>Symmetric encryption and key derivation are core topics in <strong>CompTIA Security+</strong> (cryptography domain) and <strong>ISC2 CC</strong> (cryptographic concepts). AES-GCM specifically is tested in <strong>CISSP</strong> (cryptography, secure communications) and <strong>CEH</strong> (encryption tools and techniques).</p>
+    </div>
+
+  </div>
+
+  <script src="/assets/js/data.js"></script>
+  <script src="/assets/js/theme.js"></script>
+  <script src="/assets/js/components.js"></script>
+  <script src="/assets/js/progress.js"></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      document.body.prepend(renderNav());
+      document.body.appendChild(renderFooter());
+      const btnContainer = document.getElementById('progressBtn');
+      if (btnContainer) btnContainer.appendChild(renderProgressButton('encrypted-file-vault'));
+      initCopyButtons();
+    });
+  </script>
+</body>
+</html>

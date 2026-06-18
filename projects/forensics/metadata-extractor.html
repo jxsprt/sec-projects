@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Image Metadata Extractor — sec-projects</title>
+  <meta name="description" content="Extract EXIF/GPS metadata from images — camera info, location data, timestamps — useful for OSINT investigations.">
+
+  <meta property="og:title" content="Image Metadata Extractor — sec-projects">
+  <meta property="og:description" content="Extract EXIF/GPS metadata from images for OSINT and forensic investigations.">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://sec-projects.pages.dev/projects/forensics/metadata-extractor.html">
+
+  <link rel="canonical" href="https://sec-projects.pages.dev/projects/forensics/metadata-extractor.html">
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+  <link rel="stylesheet" href="/assets/css/theme.css">
+  <link rel="stylesheet" href="/assets/css/layout.css">
+  <link rel="stylesheet" href="/assets/css/components.css">
+</head>
+<body>
+  <div class="container" style="max-width:900px; margin: calc(var(--nav-height) + var(--space-8)) auto var(--space-8); padding: 0 var(--space-6);">
+
+    <div class="breadcrumbs">
+      <a href="/">Home</a>
+      <span class="breadcrumb-sep">/</span>
+      <a href="/?cat=forensics">Forensics</a>
+      <span class="breadcrumb-sep">/</span>
+      <span>Image Metadata Extractor</span>
+    </div>
+
+    <div style="margin-bottom:var(--space-8);">
+      <div style="display:flex;align-items:center;gap:var(--space-4);flex-wrap:wrap;margin-bottom:var(--space-3);">
+        <span class="badge badge-beginner">Beginner</span>
+        <span style="color:var(--color-text-muted);font-size:var(--font-size-sm);">&#x23F1; 1-2 hours</span>
+      </div>
+      <h1 style="border-bottom:none;margin-bottom:var(--space-3);">Image Metadata Extractor</h1>
+      <p style="font-size:var(--font-size-lg);color:var(--color-text-secondary);">Extract EXIF/GPS metadata from images — camera info, location data, timestamps — useful for OSINT investigations.</p>
+      <div style="display:flex;flex-wrap:wrap;gap:var(--space-2);margin-top:var(--space-3);">
+        <span class="tag">python</span>
+        <span class="tag">exif</span>
+        <span class="tag">forensics</span>
+        <span class="tag">osint</span>
+      </div>
+    </div>
+
+    <div id="progressBtn" style="margin-bottom:var(--space-8);"></div>
+
+    <h2>Learning Objectives</h2>
+    <ul style="margin-left:var(--space-6);margin-bottom:var(--space-6);color:var(--color-text-secondary);">
+      <li>Understand EXIF metadata — what information digital cameras embed in photos</li>
+      <li>Extract camera make/model, lens info, exposure settings, and software used</li>
+      <li>Parse GPS coordinates from photos — latitude, longitude, altitude — and generate Google Maps links</li>
+      <li>Detect metadata manipulation — identify photos that have been edited or stripped of EXIF data</li>
+      <li>Batch-process entire directories and generate structured JSON reports for investigations</li>
+    </ul>
+
+    <h2>Prerequisites</h2>
+    <ul style="margin-left:var(--space-6);margin-bottom:var(--space-6);color:var(--color-text-secondary);">
+      <li>Python 3.8+ with <code>pip install Pillow</code></li>
+      <li>Sample photos with EXIF data (most smartphone photos have GPS tags if location services are enabled)</li>
+    </ul>
+
+    <h2>Step 1: Basic EXIF Extraction</h2>
+    <p>Use Pillow to extract EXIF tags from a single image. EXIF data includes camera settings, timestamps, and potentially GPS coordinates.</p>
+
+    <pre><code>#!/usr/bin/env python3
+"""EXIF Metadata Extractor — extract forensic data from images."""
+
+from PIL import Image
+from PIL.ExifTags import TAGS, GPSTAGS
+import argparse
+import os
+from datetime import datetime
+
+def get_exif_data(image_path):
+    """Extract all EXIF tags from an image and return as a human-readable dict."""
+    try:
+        img = Image.open(image_path)
+        exif_raw = img._getexif()
+        if not exif_raw:
+            return None, "No EXIF data found (possibly stripped or not a JPEG)"
+
+        exif_data = {}
+        for tag_id, value in exif_raw.items():
+            tag_name = TAGS.get(tag_id, tag_id)
+
+            # Decode GPS data specially
+            if tag_name == "GPSInfo":
+                gps_data = {}
+                for gps_tag_id, gps_value in value.items():
+                    gps_tag_name = GPSTAGS.get(gps_tag_id, gps_tag_id)
+                    gps_data[gps_tag_name] = gps_value
+                exif_data["GPSInfo"] = gps_data
+            else:
+                # Convert bytes to strings for readability
+                if isinstance(value, bytes):
+                    try:
+                        value = value.decode("utf-8", errors="replace")
+                    except:
+                        value = value.hex()
+                exif_data[tag_name] = value
+
+        return exif_data, None
+
+    except FileNotFoundError:
+        return None, f"File not found: {image_path}"
+    except Exception as e:
+        return None, f"Error processing image: {e}"
+
+def print_exif(image_path):
+    """Pretty-print EXIF data for an image."""
+    exif_data, error = get_exif_data(image_path)
+
+    if error:
+        print(f"[-] {error}")
+        return
+
+    print(f"\n{'='*55}")
+    print(f"  EXIF DATA: {os.path.basename(image_path)}")
+    print(f"  File size: {os.path.getsize(image_path):,} bytes")
+    print(f"{'='*55}")
+
+    for tag, value in sorted(exif_data.items()):
+        if tag == "GPSInfo":
+            print(f"\n  [GPS Coordinates]")
+            gps = value
+            for gps_tag, gps_val in gps.items():
+                print(f"    {gps_tag}: {gps_val}")
+            # Try to parse GPS coordinates
+            if all(k in gps for k in ("GPSLatitude", "GPSLatitudeRef",
+                                        "GPSLongitude", "GPSLongitudeRef")):
+                lat = _convert_to_degrees(gps["GPSLatitude"])
+                lon = _convert_to_degrees(gps["GPSLongitude"])
+                if gps["GPSLatitudeRef"] == "S":
+                    lat = -lat
+                if gps["GPSLongitudeRef"] == "W":
+                    lon = -lon
+                print(f"\n    📍 {lat:.6f}, {lon:.6f}")
+                print(f"    🗺  Google Maps: https://maps.google.com/?q={lat:.6f},{lon:.6f}")
+        else:
+            print(f"  {tag:<25} {value}")
+
+def _convert_to_degrees(value):
+    """Convert GPS EXIF value (tuple of DMS) to decimal degrees."""
+    if isinstance(value, tuple) and len(value) == 3:
+        d, m, s = value
+        return float(d) + float(m) / 60.0 + float(s) / 3600.0
+    return float(value)
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="EXIF Metadata Extractor")
+    parser.add_argument("image", help="Path to image file")
+    args = parser.parse_args()
+    print_exif(args.image)</code></pre>
+
+    <h2>Step 2: Batch Directory Scanner & Report Generator</h2>
+    <p>Scan entire directories of images, extract metadata from each, and generate a combined forensic report.</p>
+
+    <pre><code>import json
+import csv
+from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+class MetadataBatchScanner:
+    """Scan directories of images and compile forensic metadata reports."""
+
+    SUPPORTED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".tiff", ".tif", ".webp", ".bmp"}
+
+    def __init__(self, directory, recursive=True):
+        self.directory = Path(directory)
+        self.recursive = recursive
+        self.results = []
+
+    def find_images(self):
+        """Find all image files in the target directory."""
+        pattern = "**/*" if self.recursive else "*"
+        images = []
+        for ext in self.SUPPORTED_EXTENSIONS:
+            images.extend(self.directory.glob(f"{pattern}{ext}"))
+            images.extend(self.directory.glob(f"{pattern}{ext.upper()}"))
+        return sorted(set(images))
+
+    def process_image(self, image_path):
+        """Extract key forensic data points from one image."""
+        exif_data, error = get_exif_data(str(image_path))
+
+        result = {
+            "filename": str(image_path),
+            "filesize": os.path.getsize(image_path),
+            "has_exif": exif_data is not None,
+        }
+
+        if exif_data:
+            result.update({
+                "camera_make": exif_data.get("Make", ""),
+                "camera_model": exif_data.get("Model", ""),
+                "datetime_original": exif_data.get("DateTimeOriginal", ""),
+                "datetime_digitized": exif_data.get("DateTimeDigitized", ""),
+                "software": exif_data.get("Software", ""),
+                "image_width": exif_data.get("ExifImageWidth", 0),
+                "image_height": exif_data.get("ExifImageHeight", 0),
+                "orientation": exif_data.get("Orientation", 1),
+            })
+
+            # GPS
+            gps = exif_data.get("GPSInfo", {})
+            if all(k in gps for k in ("GPSLatitude", "GPSLatitudeRef",
+                                        "GPSLongitude", "GPSLongitudeRef")):
+                lat = _convert_to_degrees(gps["GPSLatitude"])
+                lon = _convert_to_degrees(gps["GPSLongitude"])
+                if gps["GPSLatitudeRef"] == "S": lat = -lat
+                if gps["GPSLongitudeRef"] == "W": lon = -lon
+                result["gps_latitude"] = round(lat, 6)
+                result["gps_longitude"] = round(lon, 6)
+                result["gps_maps_url"] = f"https://maps.google.com/?q={lat:.6f},{lon:.6f}"
+                if "GPSAltitude" in gps:
+                    result["gps_altitude"] = float(gps["GPSAltitude"])
+        else:
+            result["error"] = error
+
+        return result
+
+    def scan(self, workers=4):
+        """Scan all images using a thread pool."""
+        images = self.find_images()
+        print(f"[*] Found {len(images)} images in {self.directory}")
+        print(f"[*] Scanning with {workers} workers...\n")
+
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            futures = {executor.submit(self.process_image, img): img for img in images}
+            for future in as_completed(futures):
+                result = future.result()
+                self.results.append(result)
+
+                status = "✓" if result.get("has_exif") else "✗"
+                gps = ""
+                if result.get("gps_latitude"):
+                    gps = f" 📍{result['gps_latitude']},{result['gps_longitude']}"
+                print(f"  [{status}] {Path(result['filename']).name}{gps}")
+
+        return self.results
+
+    def export_json(self, output_path):
+        """Export scan results to JSON."""
+        with open(output_path, "w") as f:
+            json.dump(self.results, f, indent=2, default=str)
+        print(f"[+] JSON report exported to {output_path}")
+
+    def export_csv(self, output_path):
+        """Export scan results to CSV."""
+        if not self.results:
+            return
+        fieldnames = self.results[0].keys()
+        with open(output_path, "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(self.results)
+        print(f"[+] CSV report exported to {output_path}")
+
+    def summary(self):
+        """Print a forensic summary of all scanned images."""
+        total = len(self.results)
+        with_exif = sum(1 for r in self.results if r.get("has_exif"))
+        with_gps = sum(1 for r in self.results if r.get("gps_latitude"))
+        cameras = set()
+        software_set = set()
+        for r in self.results:
+            if r.get("camera_model"):
+                cameras.add(f"{r.get('camera_make', '')} {r['camera_model']}".strip())
+            if r.get("software"):
+                software_set.add(r["software"])
+
+        print(f"\n{'='*55}")
+        print(f"  FORENSIC METADATA SUMMARY")
+        print(f"{'='*55}")
+        print(f"  Total images:        {total}")
+        print(f"  With EXIF data:      {with_exif}")
+        print(f"  No EXIF (stripped):  {total - with_exif}")
+        print(f"  With GPS coords:     {with_gps}")
+        print(f"  Unique cameras:      {len(cameras)}")
+        for cam in sorted(cameras):
+            print(f"    - {cam}")
+        if software_set:
+            print(f"  Software used:       {', '.join(sorted(software_set))}")
+        print(f"{'='*55}")
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Batch Metadata Extractor")
+    parser.add_argument("directory", help="Directory of images to scan")
+    parser.add_argument("-o", "--output", help="Export JSON report path")
+    parser.add_argument("--csv", help="Export CSV report path")
+    parser.add_argument("-w", "--workers", type=int, default=4, help="Worker threads")
+    parser.add_argument("--no-recursive", action="store_true", help="Don't scan subdirectories")
+    args = parser.parse_args()
+
+    scanner = MetadataBatchScanner(args.directory, recursive=not args.no_recursive)
+    scanner.scan(workers=args.workers)
+    scanner.summary()
+
+    if args.output:
+        scanner.export_json(args.output)
+    if args.csv:
+        scanner.export_csv(args.csv)</code></pre>
+
+    <h2>Step 3: Anomaly Detection & Timeline Analysis</h2>
+    <p>Detect metadata inconsistencies that may indicate tampering — mismatched dates, edited software tags, or stripped metadata on what should be an original photo.</p>
+
+    <pre><code>from datetime import datetime
+
+class MetadataAnomalyDetector:
+    """Detect inconsistencies and red flags in image metadata."""
+
+    @staticmethod
+    def analyze(image_results):
+        """Check a list of scan results for anomalies. Returns list of findings."""
+        findings = []
+
+        for r in image_results:
+            flags = []
+
+            # 1. No EXIF data at all — unusual for a digital camera photo
+            if not r.get("has_exif"):
+                flags.append("No EXIF data — possibly scrubbed or screenshotted")
+
+            # 2. Software mismatch — photo has EXIF but Software field is suspicious
+            software = r.get("software", "").lower()
+            if any(tool in software for tool in ["photoshop", "gimp", "paint", "lightroom"]):
+                flags.append(f"Photo edited with: {r['software']}")
+
+            # 3. Date mismatch — original date != digitized date
+            dto = r.get("datetime_original", "")
+            dtd = r.get("datetime_digitized", "")
+            if dto and dtd and dto != dtd:
+                flags.append(f"Date mismatch: original={dto}, digitized={dtd}")
+
+            # 4. Future dates
+            for date_field in ["datetime_original", "datetime_digitized"]:
+                date_str = r.get(date_field, "")
+                if date_str:
+                    try:
+                        dt = datetime.strptime(date_str, "%Y:%m:%d %H:%M:%S")
+                        if dt > datetime.now():
+                            flags.append(f"Future date in {date_field}: {date_str}")
+                    except ValueError:
+                        pass
+
+            if flags:
+                findings.append({
+                    "filename": r["filename"],
+                    "flags": flags,
+                })
+
+        return findings
+
+
+if __name__ == "__main__":
+    # Example: detect anomalies in scan results
+    import json
+    sample = [
+        {"filename": "vacation.jpg", "has_exif": True,
+         "software": "Adobe Photoshop CS6", "datetime_original": "2024:06:15 12:00:00",
+         "datetime_digitized": "2024:06:15 14:30:00"},
+        {"filename": "screenshot.png", "has_exif": False},
+    ]
+    anomalies = MetadataAnomalyDetector.analyze(sample)
+    for a in anomalies:
+        print(f"\n[!] {a['filename']}")
+        for flag in a["flags"]:
+            print(f"    - {flag}")</code></pre>
+
+    <h2>Testing Your Extractor</h2>
+    <ul style="margin-left:var(--space-6);margin-bottom:var(--space-6);color:var(--color-text-secondary);">
+      <li><strong>Test with known EXIF:</strong> Take a photo with your smartphone (with location enabled) — it should have rich EXIF data including GPS</li>
+      <li><strong>Compare with ExifTool:</strong> Run <code>exiftool photo.jpg</code> and verify your tool extracts the same fields</li>
+      <li><strong>Test stripped images:</strong> Use <code>exiftool -all= photo.jpg</code> to strip metadata, then verify your tool reports "No EXIF data"</li>
+      <li><strong>Test non-JPEG:</strong> Try PNG and WebP files — they have less metadata but your code should handle them gracefully</li>
+    </ul>
+
+    <pre><code># Take a test photo with your phone (enable GPS/location)
+# Then:
+python metadata_extractor.py test_photo.jpg
+
+# Compare with ExifTool (install: sudo apt install exiftool)
+exiftool test_photo.jpg
+
+# Batch scan a directory
+python metadata_extractor.py ~/Pictures/ -o forensics_report.json --csv timeline.csv</code></pre>
+
+    <h2>Extension Ideas</h2>
+    <ul style="margin-left:var(--space-6);margin-bottom:var(--space-6);color:var(--color-text-secondary);">
+      <li>Generate a KML file from GPS coordinates to visualize photo locations on Google Earth</li>
+      <li>Build a web-based interactive map showing photo locations with clickable thumbnails</li>
+      <li>Add thumbnail-based perceptual hashing (pHash) to detect duplicate/near-duplicate images across a collection</li>
+      <li>Correlate camera serial numbers and timestamps across multiple photos to establish chain of custody timelines</li>
+      <li>Integrate with reverse image search APIs (Google, TinEye) to find where an image has appeared online</li>
+    </ul>
+
+    <h2>Resources & Next Steps</h2>
+    <div style="display:flex;flex-direction:column;gap:var(--space-2);margin-bottom:var(--space-8);">
+      <a class="resource-link" href="https://exiftool.org/" target="_blank" rel="noopener">
+        <span class="resource-link-icon">&#x1F4D6;</span> ExifTool by Phil Harvey (Industry Standard)
+      </a>
+      <a class="resource-link" href="https://tryhackme.com/room/ohsint" target="_blank" rel="noopener">
+        <span class="resource-link-icon">&#x1F3AF;</span> TryHackMe: OhSINT (OSINT Room)
+      </a>
+      <a class="resource-link" href="https://pillow.readthedocs.io/en/stable/reference/ExifTags.html" target="_blank" rel="noopener">
+        <span class="resource-link-icon">&#x1F4D8;</span> Pillow EXIF Tags Documentation
+      </a>
+      <a class="resource-link" href="https://exiv2.org/tags.html" target="_blank" rel="noopener">
+        <span class="resource-link-icon">&#x1F4DC;</span> Exiv2: Complete EXIF Tag Reference
+      </a>
+      <a class="resource-link" href="https://osintframework.com/" target="_blank" rel="noopener">
+        <span class="resource-link-icon">&#x1F310;</span> OSINT Framework
+      </a>
+    </div>
+
+    <div class="callout">
+      <div class="callout-title">&#x1F393; Cert Relevance</div>
+      <p>Metadata analysis is a key OSINT and forensics skill covered in <strong>CompTIA Security+</strong> (digital forensics fundamentals) and the <strong>CHFI (Computer Hacking Forensic Investigator)</strong> certification. EXIF extraction and GPS analysis are directly applicable to <strong>GCFA</strong> investigations. The OSINT aspects are tested on <strong>Certified Ethical Hacker (CEH)</strong> and <strong>GOSI (GIAC Open Source Intelligence)</strong> exams.</p>
+    </div>
+
+  </div>
+
+  <script src="/assets/js/data.js"></script>
+  <script src="/assets/js/theme.js"></script>
+  <script src="/assets/js/components.js"></script>
+  <script src="/assets/js/progress.js"></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      document.body.prepend(renderNav());
+      document.body.appendChild(renderFooter());
+      const btnContainer = document.getElementById('progressBtn');
+      if (btnContainer) btnContainer.appendChild(renderProgressButton('metadata-extractor'));
+      initCopyButtons();
+    });
+  </script>
+</body>
+</html>

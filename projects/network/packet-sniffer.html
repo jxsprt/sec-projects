@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Network Packet Sniffer — sec-projects</title>
+  <meta name="description" content="Capture and analyze live network traffic — extract IP headers, detect protocols, and reconstruct TCP streams with Scapy.">
+
+  <meta property="og:title" content="Network Packet Sniffer — sec-projects">
+  <meta property="og:description" content="Capture and analyze live network traffic with Python and Scapy.">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://sec-projects.pages.dev/projects/network/packet-sniffer.html">
+
+  <link rel="canonical" href="https://sec-projects.pages.dev/projects/network/packet-sniffer.html">
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+  <link rel="stylesheet" href="/assets/css/theme.css">
+  <link rel="stylesheet" href="/assets/css/layout.css">
+  <link rel="stylesheet" href="/assets/css/components.css">
+</head>
+<body>
+  <div class="container" style="max-width:900px; margin: calc(var(--nav-height) + var(--space-8)) auto var(--space-8); padding: 0 var(--space-6);">
+
+    <!-- Breadcrumbs -->
+    <div class="breadcrumbs">
+      <a href="/">Home</a>
+      <span class="breadcrumb-sep">/</span>
+      <a href="/?cat=network">Network Security</a>
+      <span class="breadcrumb-sep">/</span>
+      <span>Network Packet Sniffer</span>
+    </div>
+
+    <!-- Header -->
+    <div style="margin-bottom:var(--space-8);">
+      <div style="display:flex;align-items:center;gap:var(--space-4);flex-wrap:wrap;margin-bottom:var(--space-3);">
+        <span class="badge badge-intermediate">Intermediate</span>
+        <span style="color:var(--color-text-muted);font-size:var(--font-size-sm);">&#x23F1; 3-4 hours</span>
+      </div>
+      <h1 style="border-bottom:none;margin-bottom:var(--space-3);">Network Packet Sniffer</h1>
+      <p style="font-size:var(--font-size-lg);color:var(--color-text-secondary);">Capture and analyze live network traffic — extract IP headers, detect protocols, and reconstruct TCP streams.</p>
+      <div style="display:flex;flex-wrap:wrap;gap:var(--space-2);margin-top:var(--space-3);">
+        <span class="tag">python</span>
+        <span class="tag">scapy</span>
+        <span class="tag">wireshark</span>
+        <span class="tag">pcap</span>
+      </div>
+    </div>
+
+    <!-- Progress Button -->
+    <div id="progressBtn" style="margin-bottom:var(--space-8);"></div>
+
+    <!-- Learning Objectives -->
+    <h2>Learning Objectives</h2>
+    <ul style="margin-left:var(--space-6);margin-bottom:var(--space-6);color:var(--color-text-secondary);">
+      <li>Understand how network packets are structured at the Ethernet, IP, and TCP/UDP layers</li>
+      <li>Use Scapy to capture, dissect, and filter live network traffic</li>
+      <li>Detect plaintext credentials, suspicious DNS queries, and data exfiltration patterns</li>
+      <li>Reconstruct TCP streams from captured packets to view application-layer data</li>
+      <li>Write captured traffic to PCAP files for analysis in Wireshark</li>
+    </ul>
+
+    <!-- Prerequisites -->
+    <h2>Prerequisites</h2>
+    <ul style="margin-left:var(--space-6);margin-bottom:var(--space-6);color:var(--color-text-secondary);">
+      <li>Python 3.8+ installed</li>
+      <li>Basic understanding of the OSI model and TCP/IP protocols</li>
+      <li>Scapy installed (<code>pip install scapy</code>)</li>
+      <li>Root/Administrator privileges (required for raw socket capture)</li>
+    </ul>
+
+    <div class="callout">
+      <div class="callout-title">&#x26A0; Ethics & Legal</div>
+      <p>Packet sniffing on networks you don't own or lack explicit permission to monitor is illegal in most jurisdictions. Only capture traffic on networks you own, or in isolated lab environments with full authorization. Intercepting private communications violates wiretapping laws.</p>
+    </div>
+
+    <!-- Step 1 -->
+    <h2>Step 1: Basic Packet Capture</h2>
+    <p>Start by capturing packets on your network interface. Scapy's <code>sniff()</code> function provides a high-level API for live capture with optional filtering using BPF syntax.</p>
+
+    <pre><code>#!/usr/bin/env python3
+"""Basic packet sniffer using Scapy — captures and displays packet summaries."""
+
+from scapy.all import sniff, IP, TCP, UDP, ICMP
+
+def packet_callback(packet):
+    """Print a one-line summary of each captured packet."""
+    if IP in packet:
+        src = packet[IP].src
+        dst = packet[IP].dst
+        proto = packet[IP].proto
+
+        if TCP in packet:
+            sport = packet[TCP].sport
+            dport = packet[TCP].dport
+            flags = packet[TCP].flags
+            print(f"TCP  {src}:{sport} -> {dst}:{dport}  [{flags}]")
+        elif UDP in packet:
+            sport = packet[UDP].sport
+            dport = packet[UDP].dport
+            print(f"UDP  {src}:{sport} -> {dst}:{dport}")
+        elif ICMP in packet:
+            print(f"ICMP {src} -> {dst}  type={packet[ICMP].type}")
+        else:
+            print(f"IP   {src} -> {dst}  proto={proto}")
+    elif packet.haslayer("ARP"):
+        print(f"ARP  {packet.summary()}")
+
+if __name__ == "__main__":
+    print("[*] Starting packet capture on default interface (Ctrl+C to stop)...")
+    print("[*] Tip: Use 'sudo' if you get permission errors.\n")
+    # capture 50 packets for testing, or use count=0 for unlimited
+    sniff(prn=packet_callback, count=50, store=False)</code></pre>
+
+    <p><strong>Key concepts:</strong> <code>prn</code> specifies the callback for each packet. <code>store=False</code> prevents Scapy from keeping all packets in memory. The callback inspects each layer using <code>packet[IP]</code>, <code>packet[TCP]</code>, etc.</p>
+
+    <!-- Step 2 -->
+    <h2>Step 2: Protocol Statistics & Filtering</h2>
+    <p>Extend the sniffer to collect protocol distribution statistics and apply BPF filters. This is how tools like Wireshark create their protocol hierarchy view.</p>
+
+    <pre><code>from scapy.all import sniff, IP, TCP, UDP, ICMP, DNS, Raw
+from collections import Counter
+import argparse
+import sys
+
+class PacketSniffer:
+    def __init__(self, iface=None, bpf_filter=""):
+        self.iface = iface
+        self.bpf_filter = bpf_filter
+        self.stats = Counter()
+        self.packets = []
+
+    def callback(self, packet):
+        """Analyze each packet and update protocol counters."""
+        self.packets.append(packet)
+
+        if IP in packet:
+            self.stats["IP"] += 1
+
+            if TCP in packet:
+                self.stats["TCP"] += 1
+                dport = packet[TCP].dport
+                if dport == 80:
+                    self.stats["HTTP"] += 1
+                elif dport == 443:
+                    self.stats["HTTPS"] += 1
+                elif dport == 22:
+                    self.stats["SSH"] += 1
+
+                # Check for plaintext data in TCP payload
+                if Raw in packet:
+                    payload = bytes(packet[Raw].load)
+                    if b"password" in payload.lower() or b"passwd" in payload.lower():
+                        self.stats["plaintext_creds"] += 1
+                        print(f"[!] WARNING: Potential plaintext credential in {packet[IP].src}:{packet[TCP].sport} -> {packet[IP].dst}:{dport}")
+
+            elif UDP in packet:
+                self.stats["UDP"] += 1
+                if DNS in packet and packet[DNS].qr == 0:
+                    qname = packet[DNS].qd.qname.decode() if packet[DNS].qd else "?"
+                    self.stats["DNS_queries"] += 1
+                    # Flag suspicious DNS queries (long subdomains — possible DNS tunneling)
+                    if len(qname) > 50:
+                        self.stats["suspicious_dns"] += 1
+                        print(f"[!] Suspicious long DNS query: {qname}")
+
+            elif ICMP in packet:
+                self.stats["ICMP"] += 1
+
+        elif packet.haslayer("ARP"):
+            self.stats["ARP"] += 1
+
+    def run(self, count=0, timeout=None):
+        """Start sniffing with optional count/timeout."""
+        print(f"[*] Sniffing on {self.iface or 'default'} | filter: {self.bpf_filter or 'none'}")
+        sniff(iface=self.iface, prn=self.callback,
+              filter=self.bpf_filter, count=count,
+              timeout=timeout, store=False)
+
+    def report(self):
+        """Print protocol distribution summary."""
+        print("\n" + "=" * 50)
+        print(" PROTOCOL DISTRIBUTION")
+        print("=" * 50)
+        for proto, count in self.stats.most_common():
+            print(f"  {proto:<20} {count:>6}")
+        print("=" * 50)
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Packet Sniffer with Protocol Stats")
+    parser.add_argument("-i", "--iface", help="Network interface")
+    parser.add_argument("-f", "--filter", default="", help="BPF filter (e.g., 'tcp port 80')")
+    parser.add_argument("-c", "--count", type=int, default=100, help="Packet count (0=unlimited)")
+    parser.add_argument("-t", "--timeout", type=int, help="Capture timeout in seconds")
+    args = parser.parse_args()
+
+    sniffer = PacketSniffer(iface=args.iface, bpf_filter=args.filter)
+    try:
+        sniffer.run(count=args.count, timeout=args.timeout)
+    except KeyboardInterrupt:
+        print("\n[*] Capture interrupted by user.")
+    finally:
+        sniffer.report()</code></pre>
+
+    <!-- Step 3 -->
+    <h2>Step 3: TCP Stream Reconstruction</h2>
+    <p>Reconstruct TCP streams to see application-layer conversations. This is useful for inspecting HTTP requests, FTP commands, or any unencrypted protocol.</p>
+
+    <pre><code>from scapy.all import sniff, IP, TCP, Raw
+from collections import defaultdict
+
+class TCPStreamReassembler:
+    """Reconstructs TCP streams from captured packets."""
+
+    def __init__(self):
+        # streams keyed by (src_ip, src_port, dst_ip, dst_port)
+        self.streams = defaultdict(lambda: {b"client_to_server": b"", b"server_to_client": b""})
+        self.seq_tracker = {}
+
+    def process_packet(self, packet):
+        """Extract TCP payload and add to appropriate stream buffer."""
+        if not (IP in packet and TCP in packet and Raw in packet):
+            return
+
+        src = packet[IP].src
+        dst = packet[IP].dst
+        sport = packet[TCP].sport
+        dport = packet[TCP].dport
+        payload = bytes(packet[Raw].load)
+
+        # Determine direction: the first SYN sender is typically the client
+        # Simplified: use lower port as server
+        if sport < dport:
+            stream_key = (src, sport, dst, dport)
+            direction = "client_to_server"
+        else:
+            stream_key = (dst, dport, src, sport)
+            direction = "server_to_client"
+
+        self.streams[stream_key][direction] += payload
+
+    def get_streams(self):
+        """Return all reconstructed streams with their data."""
+        results = []
+        for (src, sport, dst, dport), data in self.streams.items():
+            results.append({
+                "client": f"{src}:{sport}",
+                "server": f"{dst}:{dport}",
+                "client_data": data[b"client_to_server"],
+                "server_data": data[b"server_to_client"],
+                "total_bytes": len(data[b"client_to_server"]) + len(data[b"server_to_client"])
+            })
+        return sorted(results, key=lambda s: s["total_bytes"], reverse=True)
+
+    def extract_http_requests(self):
+        """Parse HTTP requests from reconstructed streams."""
+        http_requests = []
+        for stream in self.get_streams():
+            client_data = stream["client_data"]
+            if client_data.startswith(b"GET ") or client_data.startswith(b"POST "):
+                try:
+                    lines = client_data.decode(errors="ignore").split("\r\n")
+                    request_line = lines[0]
+                    headers = {}
+                    for line in lines[1:]:
+                        if ":" in line:
+                            k, v = line.split(":", 1)
+                            headers[k.strip().lower()] = v.strip()
+                    http_requests.append({
+                        "request": request_line,
+                        "host": headers.get("host", "N/A"),
+                        "user_agent": headers.get("user-agent", "N/A"),
+                        "server": stream["server"]
+                    })
+                except Exception:
+                    pass
+        return http_requests
+
+
+if __name__ == "__main__":
+    reassembler = TCPStreamReassembler()
+    print("[*] Capturing packets for TCP stream reconstruction...")
+    print("[*] Browse some HTTP sites (not HTTPS) to see results.\n")
+
+    sniff(prn=reassembler.process_packet, count=200, store=False)
+
+    streams = reassembler.get_streams()
+    print(f"\n[*] Reconstructed {len(streams)} TCP streams:\n")
+    for s in streams[:10]:  # show top 10
+        print(f"  {s['client']} -> {s['server']}  ({s['total_bytes']} bytes)")
+
+    # Show HTTP requests
+    http = reassembler.extract_http_requests()
+    if http:
+        print(f"\n[*] Found {len(http)} HTTP requests:")
+        for req in http:
+            print(f"  {req['request']}")
+            print(f"    Host: {req['host']}")</code></pre>
+
+    <!-- Step 4 -->
+    <h2>Step 4: Export to PCAP & Wireshark Integration</h2>
+    <p>Save captured packets to a PCAP file so you can analyze them in Wireshark or share with colleagues.</p>
+
+    <pre><code>from scapy.all import sniff, wrpcap, rdpcap
+import os
+from datetime import datetime
+
+class PCAPExporter:
+    """Captures packets and saves them to timestamped PCAP files."""
+
+    def __init__(self, output_dir="captures"):
+        self.output_dir = output_dir
+        os.makedirs(output_dir, exist_ok=True)
+        self.captured = []
+
+    def capture(self, count=500, bpf_filter=""):
+        """Capture packets and store them in memory."""
+        print(f"[*] Capturing {count} packets...")
+        self.captured = sniff(count=count, filter=bpf_filter)
+        print(f"[+] Captured {len(self.captured)} packets.")
+        return self.captured
+
+    def save_pcap(self, filename=None):
+        """Write captured packets to a PCAP file."""
+        if not self.captured:
+            print("[-] No packets to save.")
+            return None
+
+        if filename is None:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"capture_{timestamp}.pcap"
+
+        filepath = os.path.join(self.output_dir, filename)
+        wrpcap(filepath, self.captured)
+        file_size = os.path.getsize(filepath)
+
+        print(f"[+] Saved {len(self.captured)} packets to {filepath} ({file_size:,} bytes)")
+        print(f"[*] Open with: wireshark {filepath}")
+        return filepath
+
+    def load_pcap(self, filepath):
+        """Load packets from an existing PCAP file."""
+        if not os.path.exists(filepath):
+            print(f"[-] File not found: {filepath}")
+            return []
+        packets = rdpcap(filepath)
+        print(f"[+] Loaded {len(packets)} packets from {filepath}")
+        return packets
+
+
+if __name__ == "__main__":
+    exporter = PCAPExporter()
+
+    # Capture HTTP traffic
+    exporter.capture(count=200, bpf_filter="tcp port 80 or tcp port 443")
+
+    # Save to PCAP
+    pcap_path = exporter.save_pcap()
+    print(f"\n[*] Now open in Wireshark: wireshark {pcap_path} &")</code></pre>
+
+    <!-- Testing -->
+    <h2>Testing Your Sniffer</h2>
+    <p>Safe ways to verify your packet sniffer works correctly:</p>
+    <ul style="margin-left:var(--space-6);margin-bottom:var(--space-6);color:var(--color-text-secondary);">
+      <li><strong>Generate known traffic:</strong> Run <code>curl http://example.com</code> while sniffing with filter <code>"tcp port 80"</code> — you should see the HTTP request/response packets</li>
+      <li><strong>Ping test:</strong> Run <code>ping -c 5 8.8.8.8</code> while sniffing with filter <code>"icmp"</code> — you should capture exactly 10 ICMP packets (5 echo requests + 5 replies)</li>
+      <li><strong>Compare with tcpdump:</strong> Run <code>sudo tcpdump -i eth0 -c 20</code> alongside your sniffer on the same interface to verify packet counts</li>
+      <li><strong>DNS queries:</strong> Sniff with filter <code>"port 53"</code> while running <code>nslookup google.com</code></li>
+    </ul>
+
+    <pre><code># Generate test traffic for verification
+curl -s http://httpbin.org/get > /dev/null &amp;
+ping -c 3 1.1.1.1 > /dev/null &amp;
+
+# Run your sniffer simultaneously
+sudo python sniffer.py -f "tcp port 80 or icmp" -c 50</code></pre>
+
+    <!-- Extensions -->
+    <h2>Extension Ideas</h2>
+    <ul style="margin-left:var(--space-6);margin-bottom:var(--space-6);color:var(--color-text-secondary);">
+      <li>Add real-time alerting — send Slack/email alerts when plaintext passwords or suspicious DNS queries are detected</li>
+      <li>Implement ARP spoof detection by monitoring for gratuitous ARP replies with mismatched MAC addresses</li>
+      <li>Build a live bandwidth monitor that tracks bytes-per-second per IP and displays a top-talkers list</li>
+      <li>Add TLS fingerprint analysis using JA3/JA4 hashes from Client Hello packets</li>
+      <li>Integrate with VirusTotal to check destination IPs against known malicious indicators</li>
+    </ul>
+
+    <!-- Resources -->
+    <h2>Resources & Next Steps</h2>
+    <div style="display:flex;flex-direction:column;gap:var(--space-2);margin-bottom:var(--space-8);">
+      <a class="resource-link" href="https://scapy.readthedocs.io/" target="_blank" rel="noopener">
+        <span class="resource-link-icon">&#x1F4D6;</span> Scapy Documentation
+      </a>
+      <a class="resource-link" href="https://www.wireshark.org/docs/wsug_html/" target="_blank" rel="noopener">
+        <span class="resource-link-icon">&#x1F50D;</span> Wireshark User Guide
+      </a>
+      <a class="resource-link" href="https://tryhackme.com/room/wireshark" target="_blank" rel="noopener">
+        <span class="resource-link-icon">&#x1F3AF;</span> TryHackMe: Wireshark Room
+      </a>
+      <a class="resource-link" href="https://datatracker.ietf.org/doc/html/rfc793" target="_blank" rel="noopener">
+        <span class="resource-link-icon">&#x1F4DC;</span> RFC 793 — TCP Protocol Specification
+      </a>
+      <a class="resource-link" href="https://www.tcpdump.org/manpages/pcap-filter.7.html" target="_blank" rel="noopener">
+        <span class="resource-link-icon">&#x1F4C4;</span> PCAP Filter (BPF) Syntax Reference
+      </a>
+    </div>
+
+    <!-- Cert Relevance -->
+    <div class="callout">
+      <div class="callout-title">&#x1F393; Cert Relevance</div>
+      <p>This project builds directly on the protocol analysis skills tested in <strong>CompTIA Security+</strong> (network attacks & protocol analyzers) and <strong>eJPT</strong> (traffic analysis & packet inspection). TCP stream reconstruction is a core skill for the <strong>GCFA (GIAC Certified Forensic Analyst)</strong> and <strong>PNPT</strong> practical exams. Understanding packet structure at this depth will also serve you well on the <strong>CCNA</strong>.</p>
+    </div>
+
+  </div>
+
+  <!-- JS -->
+  <script src="/assets/js/data.js"></script>
+  <script src="/assets/js/theme.js"></script>
+  <script src="/assets/js/components.js"></script>
+  <script src="/assets/js/progress.js"></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      document.body.prepend(renderNav());
+      document.body.appendChild(renderFooter());
+      const btnContainer = document.getElementById('progressBtn');
+      if (btnContainer) btnContainer.appendChild(renderProgressButton('packet-sniffer'));
+      initCopyButtons();
+    });
+  </script>
+</body>
+</html>

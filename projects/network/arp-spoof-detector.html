@@ -1,0 +1,464 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ARP Spoof Detector — sec-projects</title>
+  <meta name="description" content="Detect ARP spoofing attacks on your network by monitoring ARP tables and flagging MAC address inconsistencies.">
+
+  <meta property="og:title" content="ARP Spoof Detector — sec-projects">
+  <meta property="og:description" content="Detect ARP spoofing attacks by monitoring ARP tables and flagging MAC address inconsistencies.">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://sec-projects.pages.dev/projects/network/arp-spoof-detector.html">
+
+  <link rel="canonical" href="https://sec-projects.pages.dev/projects/network/arp-spoof-detector.html">
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+  <link rel="stylesheet" href="/assets/css/theme.css">
+  <link rel="stylesheet" href="/assets/css/layout.css">
+  <link rel="stylesheet" href="/assets/css/components.css">
+</head>
+<body>
+  <div class="container" style="max-width:900px; margin: calc(var(--nav-height) + var(--space-8)) auto var(--space-8); padding: 0 var(--space-6);">
+
+    <div class="breadcrumbs">
+      <a href="/">Home</a>
+      <span class="breadcrumb-sep">/</span>
+      <a href="/?cat=network">Network Security</a>
+      <span class="breadcrumb-sep">/</span>
+      <span>ARP Spoof Detector</span>
+    </div>
+
+    <div style="margin-bottom:var(--space-8);">
+      <div style="display:flex;align-items:center;gap:var(--space-4);flex-wrap:wrap;margin-bottom:var(--space-3);">
+        <span class="badge badge-intermediate">Intermediate</span>
+        <span style="color:var(--color-text-muted);font-size:var(--font-size-sm);">&#x23F1; 2-3 hours</span>
+      </div>
+      <h1 style="border-bottom:none;margin-bottom:var(--space-3);">ARP Spoof Detector</h1>
+      <p style="font-size:var(--font-size-lg);color:var(--color-text-secondary);">Detect ARP spoofing attacks on your network by monitoring ARP tables and flagging MAC address inconsistencies.</p>
+      <div style="display:flex;flex-wrap:wrap;gap:var(--space-2);margin-top:var(--space-3);">
+        <span class="tag">python</span>
+        <span class="tag">scapy</span>
+        <span class="tag">arp</span>
+        <span class="tag">mitm</span>
+      </div>
+    </div>
+
+    <div id="progressBtn" style="margin-bottom:var(--space-8);"></div>
+
+    <h2>Learning Objectives</h2>
+    <ul style="margin-left:var(--space-6);margin-bottom:var(--space-6);color:var(--color-text-secondary);">
+      <li>Understand how ARP protocol works and why it's vulnerable to spoofing</li>
+      <li>Build a passive ARP monitor that watches for gratuitous ARP replies and unsolicited updates</li>
+      <li>Maintain a trusted IP-to-MAC mapping and detect when a MAC address changes unexpectedly</li>
+      <li>Differentiate between legitimate ARP behavior (DHCP, failover) and actual attacks</li>
+      <li>Send real-time desktop notifications or log alerts when spoofing is detected</li>
+    </ul>
+
+    <h2>Prerequisites</h2>
+    <ul style="margin-left:var(--space-6);margin-bottom:var(--space-6);color:var(--color-text-secondary);">
+      <li>Python 3.8+ with Scapy (<code>pip install scapy</code>)</li>
+      <li>Understanding of how ARP maps IP addresses to MAC addresses</li>
+      <li>Root/Administrator privileges to sniff raw ARP packets</li>
+      <li>Optionally: a second machine or VM to simulate an ARP spoofing attack for testing</li>
+    </ul>
+
+    <div class="callout">
+      <div class="callout-title">&#x26A0; Ethics & Legal</div>
+      <p>Only monitor networks you own or have explicit permission to monitor. ARP spoofing is a common attack vector used in MITM attacks — understanding detection is valuable for defense, but performing the attack on unauthorized networks is illegal.</p>
+    </div>
+
+    <h2>Step 1: Passive ARP Monitor</h2>
+    <p>Start by sniffing ARP packets and building a live mapping of IP-to-MAC addresses. Each ARP reply or gratuitous ARP updates our known host table.</p>
+
+    <pre><code>#!/usr/bin/env python3
+"""Passive ARP monitor — watch ARP traffic and build IP-to-MAC mapping."""
+
+from scapy.all import sniff, ARP
+import argparse
+from datetime import datetime
+
+class ARPMonitor:
+    def __init__(self):
+        self.arp_table = {}  # IP -> {"mac": MAC, "first_seen": time, "last_seen": time, "count": N}
+        self.alerts = []
+
+    def handle_packet(self, packet):
+        """Process an ARP packet and update the table."""
+        if ARP not in packet:
+            return
+
+        arp = packet[ARP]
+        if arp.op not in (1, 2):  # 1=who-has (request), 2=is-at (reply)
+            return
+
+        src_ip = arp.psrc
+        src_mac = arp.hwsrc
+        now = datetime.now()
+        op_name = "reply" if arp.op == 2 else "request"
+
+        # Check if this IP already has a MAC mapping
+        if src_ip in self.arp_table:
+            existing = self.arp_table[src_ip]
+
+            # If MAC changed, this is a potential spoof!
+            if existing["mac"] != src_mac and src_mac != "00:00:00:00:00:00":
+                alert = {
+                    "ip": src_ip,
+                    "old_mac": existing["mac"],
+                    "new_mac": src_mac,
+                    "type": "MAC_CHANGE",
+                    "time": now.isoformat(),
+                }
+                self.alerts.append(alert)
+                print(f"\n[!!!] ARP SPOOF DETECTED: {src_ip}")
+                print(f"       Old MAC: {existing['mac']}")
+                print(f"       New MAC: {src_mac}")
+                print(f"       Packet type: {op_name}")
+
+            # Update record
+            existing["mac"] = src_mac
+            existing["last_seen"] = now
+            existing["count"] += 1
+        else:
+            # New host discovered
+            self.arp_table[src_ip] = {
+                "mac": src_mac,
+                "first_seen": now,
+                "last_seen": now,
+                "count": 1,
+            }
+            print(f"[+] New host: {src_ip} -> {src_mac} ({op_name})")
+
+    def start(self, iface=None, count=0):
+        """Begin sniffing ARP packets."""
+        print(f"[*] ARP Monitor started on {iface or 'default interface'}")
+        print("[*] Press Ctrl+C to stop.\n")
+
+        bpf_filter = "arp"
+        sniff(iface=iface, prn=self.handle_packet,
+              filter=bpf_filter, count=count, store=False)
+
+    def get_table(self):
+        """Return current ARP table sorted by IP."""
+        return dict(sorted(self.arp_table.items(),
+                           key=lambda x: tuple(map(int, x[0].split(".")))))
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="ARP Spoof Detector")
+    parser.add_argument("-i", "--iface", help="Network interface to monitor")
+    parser.add_argument("-c", "--count", type=int, default=0,
+                        help="Number of ARP packets to capture (0=unlimited)")
+    args = parser.parse_args()
+
+    monitor = ARPMonitor()
+    try:
+        monitor.start(iface=args.iface, count=args.count)
+    except KeyboardInterrupt:
+        pass
+    except PermissionError:
+        print("[-] Permission denied. Run with sudo/admin privileges.")
+</code></pre>
+
+    <h2>Step 2: Gratuitous ARP Detection</h2>
+    <p>Add specific detection for gratuitous ARP packets — ARP replies sent without a corresponding request. Attackers often use these to poison ARP caches.</p>
+
+    <pre><code>from scapy.all import sniff, ARP, Ether
+from collections import defaultdict
+import time
+
+class GratuitousARPDetector:
+    """Detects gratuitous ARP packets, which are commonly used in spoofing attacks."""
+
+    def __init__(self, rate_threshold=3, window_sec=10):
+        self.rate_threshold = rate_threshold  # gratuitous ARPs per window
+        self.window_sec = window_sec
+        self.gratuitous_log = defaultdict(list)  # IP -> [timestamps]
+        self.arp_requests = set()  # track who-has requests for matching
+
+    def handle_packet(self, packet):
+        """Analyze ARP packet for gratuitous/unusual behavior."""
+        if ARP not in packet:
+            return
+
+        arp = packet[ARP]
+
+        if arp.op == 1:  # ARP request (who-has)
+            # Record that a request was made for this IP
+            self.arp_requests.add((arp.pdst, arp.hwdst))
+
+        elif arp.op == 2:  # ARP reply (is-at)
+            src_ip = arp.psrc
+            src_mac = arp.hwsrc
+            dst_mac = Ether in packet and packet[Ether].dst or ""
+
+            # Gratuitous ARP indicators:
+            # 1. Reply with no matching request (or broadcast destination)
+            # 2. Target MAC is broadcast (ff:ff:ff:ff:ff:ff)
+            # 3. Sender IP equals target IP (self-announcement)
+
+            is_gratuitous = (
+                arp.psrc == arp.pdst or
+                dst_mac == "ff:ff:ff:ff:ff:ff" or
+                arp.hwdst == "00:00:00:00:00:00"
+            )
+
+            if is_gratuitous:
+                now = time.time()
+                self.gratuitous_log[src_ip].append(now)
+
+                # Clean old entries outside window
+                cutoff = now - self.window_sec
+                self.gratuitous_log[src_ip] = [
+                    t for t in self.gratuitous_log[src_ip] if t > cutoff
+                ]
+
+                rate = len(self.gratuitous_log[src_ip])
+
+                if rate >= self.rate_threshold:
+                    print(f"\n[!!!] GRATUITOUS ARP FLOOD: {src_ip} ({src_mac})")
+                    print(f"       {rate} gratuitous ARPs in {self.window_sec}s window")
+                    print(f"       This is a strong indicator of ARP spoofing!")
+                else:
+                    print(f"[*] Gratuitous ARP from {src_ip} ({src_mac}) "
+                          f"— rate: {rate}/{self.window_sec}s")
+
+    def start(self, iface=None):
+        print("[*] Gratuitous ARP Detector running...")
+        print(f"[*] Alert threshold: {self.rate_threshold} gratuitous ARPs "
+              f"per {self.window_sec}s\n")
+        sniff(iface=iface, prn=self.handle_packet, filter="arp", store=False)
+
+
+if __name__ == "__main__":
+    detector = GratuitousARPDetector(rate_threshold=3, window_sec=10)
+    try:
+        detector.start()
+    except KeyboardInterrupt:
+        print("\n[*] Detector stopped.")</code></pre>
+
+    <h2>Step 3: Trusted Baseline & Alerting System</h2>
+    <p>Build the complete detector: learn a trusted baseline (manual or from initial observation window), then alert on any MAC change for critical IPs (gateway, DNS, DHCP servers).</p>
+
+    <pre><code>#!/usr/bin/env python3
+"""Complete ARP Spoof Detector with baseline learning and alerting."""
+
+from scapy.all import sniff, ARP, get_if_hwaddr
+import argparse
+import json
+import os
+import smtplib
+from email.message import EmailMessage
+from datetime import datetime
+from collections import defaultdict
+
+class ARPSpoofDetector:
+    def __init__(self, baseline_file="arp_baseline.json", learning_period=30):
+        self.baseline_file = baseline_file
+        self.learning_period = learning_period
+        self.baseline = {}        # IP -> MAC (trusted mapping)
+        self.current = {}         # IP -> MAC (live observation)
+        self.alerts = []
+        self.start_time = None
+        self.iface = None
+        self.our_mac = None
+
+    def load_baseline(self):
+        """Load a previously saved baseline from disk."""
+        if os.path.exists(self.baseline_file):
+            with open(self.baseline_file) as f:
+                self.baseline = json.load(f)
+            print(f"[+] Loaded baseline with {len(self.baseline)} entries from {self.baseline_file}")
+            return True
+        return False
+
+    def save_baseline(self):
+        """Persist the current IP->MAC mapping as the trusted baseline."""
+        with open(self.baseline_file, "w") as f:
+            json.dump(self.current, f, indent=2)
+        print(f"[+] Baseline saved: {len(self.current)} hosts to {self.baseline_file}")
+
+    def is_learning(self):
+        """Check if we're still in the learning phase."""
+        if self.start_time is None:
+            return True
+        elapsed = (datetime.now() - self.start_time).total_seconds()
+        return elapsed < self.learning_period
+
+    def handle_packet(self, packet):
+        if ARP not in packet:
+            return
+        arp = packet[ARP]
+        if arp.op not in (1, 2):
+            return
+
+        src_ip = arp.psrc
+        src_mac = arp.hwsrc
+
+        # Ignore our own MAC
+        if self.our_mac and src_mac == self.our_mac:
+            return
+        # Ignore zero/empty MAC
+        if src_mac in ("00:00:00:00:00:00", ""):
+            return
+
+        if self.is_learning():
+            # Learning phase: just record everything
+            self.current[src_ip] = src_mac
+            return
+
+        # Detection phase: compare against baseline
+        trusted_mac = self.baseline.get(src_ip)
+
+        if trusted_mac is None:
+            # New host we haven't seen before — could be suspicious
+            print(f"[?] Unknown host appeared: {src_ip} -> {src_mac}")
+
+        elif trusted_mac != src_mac:
+            # MAC CHANGED — alert!
+            self.alert(ip=src_ip, old_mac=trusted_mac, new_mac=src_mac, packet=packet)
+
+        # Update live view
+        self.current[src_ip] = src_mac
+
+    def alert(self, ip, old_mac, new_mac, packet):
+        now = datetime.now().isoformat()
+        entry = {
+            "time": now,
+            "ip": ip,
+            "old_mac": old_mac,
+            "new_mac": new_mac,
+            "severity": "CRITICAL",
+        }
+        self.alerts.append(entry)
+
+        # Console alert
+        print(f"\n{'='*55}")
+        print(f"[!!!] ARP SPOOFING DETECTED — {now}")
+        print(f"  Victim IP:    {ip}")
+        print(f"  Trusted MAC:  {old_mac}")
+        print(f"  Rogue MAC:    {new_mac}")
+        print(f"{'='*55}\n")
+
+    def start(self, iface=None):
+        self.iface = iface
+        self.our_mac = get_if_hwaddr(iface) if iface else None
+        self.start_time = datetime.now()
+
+        # Try to load existing baseline
+        if not self.load_baseline():
+            print(f"[*] No baseline found. Learning for {self.learning_period}s...")
+            print("[*] Ensure no ARP spoofing is happening during this window!\n")
+
+        sniff(iface=iface, prn=self.handle_packet, filter="arp", store=False)
+
+    def report(self):
+        print(f"\n[*] ARP Table ({len(self.current)} hosts):")
+        for ip in sorted(self.current, key=lambda x: tuple(map(int, x.split(".")))):
+            mac = self.current[ip]
+            trusted = self.baseline.get(ip, "?")
+            flag = " ✓" if trusted == mac else " ✗ MISMATCH!"
+            print(f"  {ip:<16} {mac:<19} (baseline: {trusted}){flag}")
+
+        if self.alerts:
+            print(f"\n[!!!] {len(self.alerts)} ARP spoof alert(s) recorded.")
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="ARP Spoof Detector")
+    parser.add_argument("-i", "--iface", help="Network interface")
+    parser.add_argument("-l", "--learn", type=int, default=30,
+                        help="Learning period in seconds (default: 30)")
+    parser.add_argument("--save", action="store_true",
+                        help="Save baseline and exit after learning period")
+    args = parser.parse_args()
+
+    detector = ARPSpoofDetector(learning_period=args.learn)
+
+    if args.save:
+        # Learning-only mode
+        print(f"[*] Learning mode — capturing ARP for {args.learn}s...")
+        try:
+            detector.start(iface=args.iface)
+        except KeyboardInterrupt:
+            pass
+        detector.save_baseline()
+    else:
+        try:
+            detector.start(iface=args.iface)
+        except KeyboardInterrupt:
+            detector.report()</code></pre>
+
+    <h2>Testing Your Detector</h2>
+    <p>Test approaches in a safe lab environment:</p>
+    <ul style="margin-left:var(--space-6);margin-bottom:var(--space-6);color:var(--color-text-secondary);">
+      <li><strong>Normal traffic baseline:</strong> Run the detector with <code>--learn 60</code> on your home network to build a legitimate baseline</li>
+      <li><strong>Simulate spoofing:</strong> From a second machine, run <code>sudo arpspoof -i eth0 -t VICTIM_IP GATEWAY_IP</code> (from <code>dsniff</code> package) — your detector should fire immediately</li>
+      <li><strong>Test with Scapy:</strong> Craft a fake gratuitous ARP: <code>send(ARP(op=2, psrc="192.168.1.1", hwsrc="aa:bb:cc:dd:ee:ff", pdst="192.168.1.1"))</code></li>
+      <li><strong>Verify against Wireshark:</strong> Compare your detector's alerts with Wireshark's <code>arp.duplicate-address-detected</code> expert info</li>
+    </ul>
+
+    <pre><code># Generate a test gratuitous ARP with Python/Scapy
+from scapy.all import ARP, Ether, sendp
+fake_arp = Ether(dst="ff:ff:ff:ff:ff:ff") / ARP(
+    op=2,  # is-at (reply)
+    psrc="192.168.1.1",       # gateway IP
+    hwsrc="de:ad:be:ef:ca:fe", # fake MAC
+    pdst="192.168.1.1"         # gratuitous
+)
+sendp(fake_arp, iface="eth0")</code></pre>
+
+    <h2>Extension Ideas</h2>
+    <ul style="margin-left:var(--space-6);margin-bottom:var(--space-6);color:var(--color-text-secondary);">
+      <li>Add active defense — send legitimate gratuitous ARP replies to restore correct MAC mappings when spoofing is detected</li>
+      <li>Integrate with Slack/Discord webhooks for real-time alerts when ARP spoofing is detected</li>
+      <li>Maintain a historical database of MAC-to-IP mappings and detect patterns over days/weeks</li>
+      <li>Cross-reference detected MACs against the IEEE OUI database to identify NIC vendors (e.g., detect a Dell MAC on what should be a Cisco router)</li>
+      <li>Extend to detect DHCP spoofing by monitoring for rogue DHCP OFFER packets</li>
+    </ul>
+
+    <h2>Resources & Next Steps</h2>
+    <div style="display:flex;flex-direction:column;gap:var(--space-2);margin-bottom:var(--space-8);">
+      <a class="resource-link" href="https://www.varonis.com/blog/arp-poisoning" target="_blank" rel="noopener">
+        <span class="resource-link-icon">&#x1F4D6;</span> ARP Poisoning Explained (Varonis)
+      </a>
+      <a class="resource-link" href="https://tryhackme.com/room/arpspoofing" target="_blank" rel="noopener">
+        <span class="resource-link-icon">&#x1F3AF;</span> TryHackMe: ARP Spoofing Room
+      </a>
+      <a class="resource-link" href="https://scapy.readthedocs.io/en/latest/api/scapy.layers.l2.html" target="_blank" rel="noopener">
+        <span class="resource-link-icon">&#x1F4D8;</span> Scapy Layer 2 (ARP/Ethernet) API Docs
+      </a>
+      <a class="resource-link" href="https://datatracker.ietf.org/doc/html/rfc826" target="_blank" rel="noopener">
+        <span class="resource-link-icon">&#x1F4DC;</span> RFC 826 — Ethernet Address Resolution Protocol
+      </a>
+      <a class="resource-link" href="https://standards-oui.ieee.org/" target="_blank" rel="noopener">
+        <span class="resource-link-icon">&#x1F3ED;</span> IEEE OUI Registry (MAC Vendor Lookup)
+      </a>
+    </div>
+
+    <div class="callout">
+      <div class="callout-title">&#x1F393; Cert Relevance</div>
+      <p>ARP spoofing is a core topic in <strong>CompTIA Security+</strong> (network attacks, on-path/MITM attacks) and <strong>eJPT</strong> (network-based attacks). Understanding ARP protocol weaknesses is essential for the <strong>PNPT</strong> practical exam where MITM attacks are commonly employed. This project also covers Layer 2 security concepts tested on the <strong>CCNA</strong> (switch security features like DAI).</p>
+    </div>
+
+  </div>
+
+  <script src="/assets/js/data.js"></script>
+  <script src="/assets/js/theme.js"></script>
+  <script src="/assets/js/components.js"></script>
+  <script src="/assets/js/progress.js"></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      document.body.prepend(renderNav());
+      document.body.appendChild(renderFooter());
+      const btnContainer = document.getElementById('progressBtn');
+      if (btnContainer) btnContainer.appendChild(renderProgressButton('arp-spoof-detector'));
+      initCopyButtons();
+    });
+  </script>
+</body>
+</html>

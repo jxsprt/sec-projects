@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Basic Hash Cracker — sec-projects</title>
+  <meta name="description" content="Build a dictionary-based hash cracker supporting MD5, SHA1, and SHA256 — understand how password cracking tools work.">
+
+  <meta property="og:title" content="Basic Hash Cracker — sec-projects">
+  <meta property="og:description" content="Build a dictionary-based hash cracker supporting MD5, SHA1, and SHA256.">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://sec-projects.pages.dev/projects/fundamentals/basic-hash-cracker.html">
+
+  <link rel="canonical" href="https://sec-projects.pages.dev/projects/fundamentals/basic-hash-cracker.html">
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+  <link rel="stylesheet" href="/assets/css/theme.css">
+  <link rel="stylesheet" href="/assets/css/layout.css">
+  <link rel="stylesheet" href="/assets/css/components.css">
+</head>
+<body>
+  <div class="container" style="max-width:900px; margin: calc(var(--nav-height) + var(--space-8)) auto var(--space-8); padding: 0 var(--space-6);">
+
+    <div class="breadcrumbs">
+      <a href="/">Home</a>
+      <span class="breadcrumb-sep">/</span>
+      <a href="/?cat=fundamentals">Fundamentals</a>
+      <span class="breadcrumb-sep">/</span>
+      <span>Basic Hash Cracker</span>
+    </div>
+
+    <div style="margin-bottom:var(--space-8);">
+      <div style="display:flex;align-items:center;gap:var(--space-4);flex-wrap:wrap;margin-bottom:var(--space-3);">
+        <span class="badge badge-intermediate">Intermediate</span>
+        <span style="color:var(--color-text-muted);font-size:var(--font-size-sm);">&#x23F1; 2-3 hours</span>
+      </div>
+      <h1 style="border-bottom:none;margin-bottom:var(--space-3);">Basic Hash Cracker</h1>
+      <p style="font-size:var(--font-size-lg);color:var(--color-text-secondary);">Build a dictionary-based hash cracker supporting MD5, SHA1, and SHA256 — understand how password cracking tools work under the hood.</p>
+      <div style="display:flex;flex-wrap:wrap;gap:var(--space-2);margin-top:var(--space-3);">
+        <span class="tag">python</span>
+        <span class="tag">hashing</span>
+        <span class="tag">dictionary-attack</span>
+      </div>
+    </div>
+
+    <div id="progressBtn" style="margin-bottom:var(--space-8);"></div>
+
+    <h2>Learning Objectives</h2>
+    <ul style="margin-left:var(--space-6);margin-bottom:var(--space-6);color:var(--color-text-secondary);">
+      <li>Understand how one-way hash functions (MD5, SHA1, SHA256) are used in password storage</li>
+      <li>Implement dictionary attacks — the most common password cracking technique</li>
+      <li>Learn why salted hashes are essential (and why unsalted hashes are trivially crackable)</li>
+      <li>Compare cracking speed across different hash algorithms</li>
+      <li>Gain insight into how tools like Hashcat and John the Ripper work internally</li>
+    </ul>
+
+    <h2>Prerequisites</h2>
+    <ul style="margin-left:var(--space-6);margin-bottom:var(--space-6);color:var(--color-text-secondary);">
+      <li>Python 3.8+ installed</li>
+      <li>Understanding of Python file I/O and string manipulation</li>
+      <li>Download a wordlist (we'll use the classic <code>rockyou.txt</code>)</li>
+    </ul>
+
+    <div class="callout">
+      <div class="callout-title">&#x26A0; Ethics &amp; Legal</div>
+      <p>Only crack hashes you own or have explicit permission to test. Hash cracking tools are legitimate for security auditing, password recovery, and education — but unauthorized use against systems you don't own is illegal.</p>
+    </div>
+
+    <!-- Step 1 -->
+    <h2>Step 1: Hash Identification &amp; Computation</h2>
+    <p>First, build a tool to compute and identify hashes. Different algorithms produce different output lengths and patterns that let us detect the algorithm.</p>
+
+    <pre><code>import hashlib
+import re
+
+def compute_hash(text, algorithm='sha256'):
+    """Compute the hash of a string using the specified algorithm."""
+    h = hashlib.new(algorithm)
+    h.update(text.encode('utf-8'))
+    return h.hexdigest()
+
+def identify_hash(hash_str):
+    """Identify likely hash algorithm from format."""
+    hash_str = hash_str.strip().lower()
+    length = len(hash_str)
+
+    # MD5: 32 hex chars
+    if length == 32 and re.match(r'^[a-f0-9]{32}$', hash_str):
+        return ['md5', 'ntlm']
+    # SHA1: 40 hex chars
+    elif length == 40 and re.match(r'^[a-f0-9]{40}$', hash_str):
+        return ['sha1']
+    # SHA256: 64 hex chars
+    elif length == 64 and re.match(r'^[a-f0-9]{64}$', hash_str):
+        return ['sha256']
+    # SHA512: 128 hex chars
+    elif length == 128 and re.match(r'^[a-f0-9]{128}$', hash_str):
+        return ['sha512']
+    else:
+        return ['unknown']
+
+# Test
+test_hashes = {
+    'md5': compute_hash('password', 'md5'),
+    'sha1': compute_hash('password', 'sha1'),
+    'sha256': compute_hash('password', 'sha256'),
+}
+for algo, h in test_hashes.items():
+    print(f"{algo.upper():6s}: {h} -> {identify_hash(h)}")</code></pre>
+
+    <!-- Step 2 -->
+    <h2>Step 2: Dictionary Attack Engine</h2>
+    <p>The core attack: read a wordlist line by line, hash each candidate, and compare against target hashes. This is fast because we can hash once and compare against multiple targets.</p>
+
+    <pre><code>import time
+
+class HashCracker:
+    def __init__(self):
+        self.algorithms = ['md5', 'sha1', 'sha256']
+        self.found = {}  # hash -> plaintext
+
+    def dictionary_attack(self, target_hashes, wordlist_path, algorithm='sha256'):
+        """
+        Attempt to crack hashes using a wordlist.
+
+        Args:
+            target_hashes: set of hash strings to crack
+            wordlist_path: path to wordlist file (one word per line)
+            algorithm: hash algorithm to use
+
+        Returns:
+            dict of {hash: plaintext} for cracked hashes
+        """
+        target_hashes = {h.strip().lower() for h in target_hashes}
+        cracked = {}
+        start_time = time.time()
+        attempts = 0
+
+        try:
+            with open(wordlist_path, 'r', encoding='utf-8', errors='ignore') as f:
+                for line in f:
+                    word = line.strip()
+                    if not word:
+                        continue
+
+                    attempts += 1
+                    h = compute_hash(word, algorithm)
+
+                    if h in target_hashes:
+                        cracked[h] = word
+                        print(f"[+] CRACKED: {h} = '{word}'")
+                        # Early exit if all cracked
+                        if len(cracked) == len(target_hashes):
+                            break
+
+        except FileNotFoundError:
+            print(f"Wordlist not found: {wordlist_path}")
+            return cracked
+
+        elapsed = time.time() - start_time
+        speed = attempts / elapsed if elapsed > 0 else 0
+        print(f"\nSearched {attempts:,} candidates in {elapsed:.1f}s ({speed:,.0f} hashes/sec)")
+        print(f"Cracked: {len(cracked)}/{len(target_hashes)}")
+        return cracked
+
+# Example usage
+cracker = HashCracker()
+targets = {
+    compute_hash('letmein', 'md5'),
+    compute_hash('trustno1', 'md5'),
+    compute_hash('admin123', 'md5'),
+}
+# cracker.dictionary_attack(targets, 'rockyou.txt', 'md5')</code></pre>
+
+    <p><strong>Performance note:</strong> Without a GPU, expect ~100K–500K hashes/sec for MD5, slower for SHA256. Hashcat on a GPU can do billions per second — it's worth testing this to understand the scale difference.</p>
+
+    <!-- Step 3 -->
+    <h2>Step 3: Rule-Based Mutation (Beyond Plain Dictionary)</h2>
+    <p>Plain dictionary attacks miss passwords like "Password1" or "admin2024!". Rule-based mutation applies common transformations to each dictionary word.</p>
+
+    <pre><code>def apply_rules(word):
+    """Generate common mutations of a word for rule-based attacks."""
+    mutations = {word, word.lower(), word.upper(), word.capitalize()}
+
+    # Common suffixes
+    for suffix in ['1', '123', '1234', '12345', '!', '@', '#',
+                   '2024', '2023', '2022', '2021', '2020']:
+        mutations.add(word + suffix)
+
+    # Leet speak substitutions
+    leet = word.replace('a', '4').replace('e', '3').replace('i', '1')\
+                .replace('o', '0').replace('s', '5').replace('t', '7')
+    mutations.add(leet)
+
+    # Reverse
+    mutations.add(word[::-1])
+
+    # Duplicate
+    mutations.add(word + word)
+
+    return mutations
+
+def rule_based_attack(target_hashes, wordlist_path, algorithm='sha256', max_rules=10):
+    """Dictionary attack with rule-based mutations."""
+    target_set = {h.strip().lower() for h in target_hashes}
+    cracked = {}
+    attempts = 0
+    rules_applied = 0
+
+    with open(wordlist_path, 'r', encoding='utf-8', errors='ignore') as f:
+        for line in f:
+            word = line.strip()
+            if not word:
+                continue
+
+            # Apply rules
+            candidates = apply_rules(word)
+            rules_applied += len(candidates)
+
+            for candidate in candidates:
+                attempts += 1
+                h = compute_hash(candidate, algorithm)
+
+                if h in target_set:
+                    cracked[h] = candidate
+                    print(f"[+] CRACKED: {h} = '{candidate}' (base: '{word}')")
+
+                    if len(cracked) == len(target_set):
+                        return cracked
+
+    print(f"Total attempts: {attempts:,} (from {rules_applied:,} mutations)")
+    return cracked</code></pre>
+
+    <p><strong>Why rules matter:</strong> Most password policies require digits or special characters. Users satisfy these with predictable patterns (word + "1", word + "!"). Rule-based attacks exploit this predictability — and they're much faster than pure brute-force.</p>
+
+    <!-- Step 4 -->
+    <h2>Step 4: Complete CLI Cracker</h2>
+    <p>Combine everything into a polished, multi-threaded CLI tool with progress reporting.</p>
+
+    <pre><code>import argparse
+from concurrent.futures import ThreadPoolExecutor
+import sys
+
+def main():
+    parser = argparse.ArgumentParser(description='Basic Hash Cracker')
+    parser.add_argument('-w', '--wordlist', required=True, help='Path to wordlist')
+    parser.add_argument('-H', '--hash', action='append', help='Hash to crack (can repeat)')
+    parser.add_argument('-f', '--hashfile', help='File with hashes (one per line)')
+    parser.add_argument('-a', '--algorithm', default='sha256',
+                        choices=['md5', 'sha1', 'sha256', 'sha512'],
+                        help='Hash algorithm')
+    parser.add_argument('-r', '--rules', action='store_true', help='Enable rule-based mutations')
+    parser.add_argument('-o', '--output', help='Save cracked hashes to file')
+    parser.add_argument('--identify', metavar='HASH', help='Identify hash type and exit')
+
+    args = parser.parse_args()
+
+    # Hash identification mode
+    if args.identify:
+        algs = identify_hash(args.identify)
+        print(f"Hash: {args.identify}")
+        print(f"Likely algorithms: {', '.join(algs)}")
+        sys.exit(0)
+
+    # Collect target hashes
+    targets = set()
+    if args.hash:
+        targets.update(args.hash)
+    if args.hashfile:
+        with open(args.hashfile) as f:
+            targets.update(line.strip() for line in f if line.strip())
+
+    if not targets:
+        parser.error("No hashes provided. Use -H or -f.")
+
+    print(f"Target hashes: {len(targets)}")
+    print(f"Algorithm: {args.algorithm}")
+    print(f"Wordlist: {args.wordlist}")
+    print(f"Rules: {'ON' if args.rules else 'OFF'}")
+    print("=" * 50)
+
+    cracker = HashCracker()
+
+    if args.rules:
+        results = rule_based_attack(targets, args.wordlist, args.algorithm)
+    else:
+        results = cracker.dictionary_attack(targets, args.wordlist, args.algorithm)
+
+    # Output results
+    if args.output:
+        with open(args.output, 'w') as f:
+            for h, plain in results.items():
+                f.write(f"{h}:{plain}\n")
+        print(f"\nResults saved to {args.output}")
+
+    # Summary
+    print(f"\n{'='*50}")
+    print(f"CRACKED: {len(results)}/{len(targets)}")
+    if results:
+        print("\nResults:")
+        for h, plain in results.items():
+            print(f"  {h[:16]}... -> {plain}")
+
+if __name__ == '__main__':
+    main()</code></pre>
+
+    <!-- Testing -->
+    <h2>Testing Your Cracker</h2>
+    <p>Create known hashes and verify your tool cracks them:</p>
+    <pre><code># Generate test hashes
+python -c "
+import hashlib
+words = ['password', 'admin', 'letmein', 'trustno1', 'shadow']
+for w in words:
+    h = hashlib.md5(w.encode()).hexdigest()
+    print(h)
+" > test_hashes.txt
+
+# Create a mini wordlist
+echo -e "password\nadmin\nletmein\ntrustno1\nhello\nworld" > test_words.txt
+
+# Crack!
+python hash_cracker.py -w test_words.txt -f test_hashes.txt -a md5
+
+# Expected output:
+# [+] CRACKED: 5f4dcc3b... = 'password'
+# [+] CRACKED: 21232f29... = 'admin'
+# [+] CRACKED: 0d107d09... = 'letmein'
+# [+] CRACKED: d33c60e8... = 'trustno1'
+# CRACKED: 4/5  (shadow not in wordlist)</code></pre>
+
+    <!-- Extensions -->
+    <h2>Extension Ideas</h2>
+    <ul style="margin-left:var(--space-6);margin-bottom:var(--space-6);color:var(--color-text-secondary);">
+      <li>Add <strong>brute-force mode</strong> that generates all combinations up to N characters</li>
+      <li>Implement <strong>salted hash cracking</strong> — read salt from hash format like <code>sha256$salt$hash</code></li>
+      <li>Add <strong>multi-threading</strong> to parallelize wordlist processing across CPU cores</li>
+      <li>Support <strong>resume</strong> — save progress and continue from where you left off</li>
+      <li>Add <strong>combinator attack</strong> — combine two words from separate wordlists</li>
+    </ul>
+
+    <!-- Resources -->
+    <h2>Resources &amp; Next Steps</h2>
+    <div style="display:flex;flex-direction:column;gap:var(--space-2);margin-bottom:var(--space-8);">
+      <a class="resource-link" href="https://github.com/brannondorsey/naive-hashcat/releases" target="_blank" rel="noopener">
+        <span class="resource-link-icon">&#x1F4E6;</span> RockYou Wordlist Download
+      </a>
+      <a class="resource-link" href="https://hashcat.net/wiki/" target="_blank" rel="noopener">
+        <span class="resource-link-icon">&#x1F4D6;</span> Hashcat Wiki — Rule-Based Attack Documentation
+      </a>
+      <a class="resource-link" href="https://docs.python.org/3/library/hashlib.html" target="_blank" rel="noopener">
+        <span class="resource-link-icon">&#x1F4D8;</span> Python hashlib Documentation
+      </a>
+      <a class="resource-link" href="https://crackstation.net/" target="_blank" rel="noopener">
+        <span class="resource-link-icon">&#x1F50D;</span> CrackStation — Online Hash Lookup (Reference)
+      </a>
+    </div>
+
+    <!-- Cert Relevance -->
+    <div class="callout">
+      <div class="callout-title">&#x1F393; Cert Relevance</div>
+      <p>Hash cracking is directly relevant to <strong>OSCP</strong> and <strong>PNPT</strong> (credential access, password attacks). Understanding hash functions and dictionary attacks is tested on <strong>CompTIA Security+</strong> (cryptography) and <strong>eJPT</strong> (password cracking methodology). For blue team roles, understanding how attackers crack hashes informs better detection engineering and password policy design — relevant to <strong>CompTIA CySA+</strong> and <strong>CISSP</strong> Domain 3.</p>
+    </div>
+
+  </div>
+
+  <script src="/assets/js/data.js"></script>
+  <script src="/assets/js/theme.js"></script>
+  <script src="/assets/js/components.js"></script>
+  <script src="/assets/js/progress.js"></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      document.body.prepend(renderNav());
+      document.body.appendChild(renderFooter());
+      const btnContainer = document.getElementById('progressBtn');
+      if (btnContainer) btnContainer.appendChild(renderProgressButton('basic-hash-cracker'));
+      initCopyButtons();
+    });
+  </script>
+</body>
+</html>

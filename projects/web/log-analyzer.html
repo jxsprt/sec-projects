@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Log Analyzer & Intrusion Detector — sec-projects</title>
+  <meta name="description" content="Parse web server logs to detect attack patterns — SQLi, XSS, path traversal, brute force — and generate alert reports.">
+  <meta property="og:title" content="Log Analyzer & Intrusion Detector — sec-projects">
+  <meta property="og:description" content="Parse web server logs to detect attack patterns.">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://sec-projects.pages.dev/projects/web/log-analyzer.html">
+  <link rel="canonical" href="https://sec-projects.pages.dev/projects/web/log-analyzer.html">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/assets/css/theme.css">
+  <link rel="stylesheet" href="/assets/css/layout.css">
+  <link rel="stylesheet" href="/assets/css/components.css">
+</head>
+<body>
+<div class="container" style="max-width:900px; margin: calc(var(--nav-height) + var(--space-8)) auto var(--space-8); padding: 0 var(--space-6);">
+
+<div class="breadcrumbs">
+  <a href="/">Home</a><span class="breadcrumb-sep">/</span>
+  <a href="/?cat=web">Web Security</a><span class="breadcrumb-sep">/</span>
+  <span>Log Analyzer & Intrusion Detector</span>
+</div>
+
+<div style="margin-bottom:var(--space-8);">
+  <div style="display:flex;align-items:center;gap:var(--space-4);flex-wrap:wrap;margin-bottom:var(--space-3);">
+    <span class="badge badge-intermediate">Intermediate</span>
+    <span style="color:var(--color-text-muted);font-size:var(--font-size-sm);">&#x23F1; 3-5 hours</span>
+  </div>
+  <h1 style="border-bottom:none;margin-bottom:var(--space-3);">Log Analyzer & Intrusion Detector</h1>
+  <p style="font-size:var(--font-size-lg);color:var(--color-text-secondary);">Parse web server logs to detect attack patterns — SQLi, XSS, path traversal, brute force — and generate alert reports.</p>
+  <div style="display:flex;flex-wrap:wrap;gap:var(--space-2);margin-top:var(--space-3);">
+    <span class="tag">python</span><span class="tag">regex</span><span class="tag">log-analysis</span><span class="tag">siem-basics</span>
+  </div>
+</div>
+
+<div id="progressBtn" style="margin-bottom:var(--space-8);"></div>
+
+<!-- Learning Objectives -->
+<h2>Learning Objectives</h2>
+<ul style="margin-left:var(--space-6);margin-bottom:var(--space-6);color:var(--color-text-secondary);">
+  <li>Parse and normalize multiple web server log formats (Apache, Nginx, IIS)</li>
+  <li>Write regex-based detection rules for common web attacks (SQLi, XSS, LFI, path traversal)</li>
+  <li>Implement time-window analysis to detect brute force and credential stuffing</li>
+  <li>Build an alerting pipeline with severity classification and report generation</li>
+  <li>Correlate events across multiple log sources to reconstruct attack chains</li>
+</ul>
+
+<h2>Prerequisites</h2>
+<ul style="margin-left:var(--space-6);margin-bottom:var(--space-6);color:var(--color-text-secondary);">
+  <li>Python 3.8+ installed</li>
+  <li>Basic understanding of regular expressions</li>
+  <li>Familiarity with HTTP status codes and common web attack vectors</li>
+  <li>Sample Apache/Nginx access logs (samples provided below)</li>
+</ul>
+
+<div class="callout">
+  <div class="callout-title">&#x26A0; Ethics & Legal</div>
+  <p>Only analyze log files from systems you own or have permission to examine. Production logs may contain PII — handle them responsibly and never share unredacted logs publicly.</p>
+</div>
+
+<h2>Step 1: Parse Apache/Nginx Access Logs</h2>
+<p>Start by parsing the Combined Log Format used by Apache and Nginx. Named capture groups produce clean dictionary output.</p>
+
+<pre><code>import re
+from datetime import datetime
+
+class LogParser:
+    COMBINED_PATTERN = re.compile(
+        r'^(?P&lt;ip&gt;\S+) \S+ \S+ '
+        r'\[(?P&lt;timestamp&gt;[^\]]+)\] '
+        r'"(?P&lt;method&gt;\S+) (?P&lt;path&gt;\S+) (?P&lt;protocol&gt;[^"]+)" '
+        r'(?P&lt;status&gt;\d{3}) (?P&lt;size&gt;\S+) '
+        r'"(?P&lt;referer&gt;[^"]*)" '
+        r'"(?P&lt;user_agent&gt;[^"]*)"'
+    )
+
+    def parse_line(self, line):
+        match = self.COMBINED_PATTERN.match(line.strip())
+        if not match:
+            return None
+        event = match.groupdict()
+        event['status'] = int(event['status'])
+        event['size'] = int(event['size']) if event['size'].isdigit() else 0
+        try:
+            event['timestamp'] = datetime.strptime(
+                event['timestamp'], '%d/%b/%Y:%H:%M:%S %z'
+            )
+        except ValueError:
+            event['timestamp'] = datetime.now()
+        if '?' in event['path']:
+            event['url'], event['query_string'] = event['path'].split('?', 1)
+        else:
+            event['url'] = event['path']
+            event['query_string'] = ''
+        return event
+
+parser = LogParser()
+sample = '192.168.1.1 - - [01/Jun/2025:12:34:56 +0000] "GET /login?id=1 HTTP/1.1" 200 1234 "-" "Mozilla/5.0"'
+print(parser.parse_line(sample))</code></pre>
+
+<p><strong>Key concept:</strong> Split the path on <code>?</code> to isolate the query string — that's where most injection payloads hide.</p>
+
+<h2>Step 2: Detect Web Attack Patterns</h2>
+<p>Write regex signatures for common web attacks. Each signature targets patterns in URLs, query strings, and user agents.</p>
+
+<pre><code>class AttackDetector:
+    def __init__(self):
+        self.signatures = {
+            'sqli': [
+                r"(?i)(\bUNION\s+SELECT\b)",
+                r"(?i)(\bOR\s+['\"]?\d['\"]?\s*=\s*['\"]?\d['\"]?)",
+                r"(?i)(\bSLEEP\s*\(.*\))",
+                r"(?i)(--\s*[^a-zA-Z0-9]*$)",
+                r"(?i)(\bWAITFOR\s+DELAY\b)",
+            ],
+            'xss': [
+                r"(?i)(&lt;script[^&gt;]*&gt;)",
+                r"(?i)(javascript\s*:.*)",
+                r"(?i)(on\w+\s*=\s*['\"].*['\"])",
+                r"(?i)(&lt;img[^&gt;]+onerror\s*=)",
+            ],
+            'path_traversal': [
+                r"(\.\.\/)+",
+                r"(\.\.%2F)+",
+                r"(%2F\.\.){2,}",
+                r"(/etc/passwd|/etc/shadow)",
+                r"(\bphp://filter\b|\bexpect://\b)",
+            ],
+            'cmd_injection': [
+                r"(?i)(;\s*(id|whoami|ls|pwd|uname|cat|wget)\b)",
+                r"(?i)(\|{1,2}\s*(id|whoami|ls|pwd))",
+                r"(?i)(`[^`]+`)",
+            ],
+            'scanner_ua': [
+                r"(?i)(sqlmap|nikto|nmap|acunetix|nessus|openvas|burpsuite|dirbuster|wfuzz)",
+            ],
+        }
+
+    def analyze(self, event):
+        detections = []
+        haystack = f"{event.get('url','')} {event.get('query_string','')} {event.get('user_agent','')}"
+        for category, patterns in self.signatures.items():
+            for pattern in patterns:
+                if re.search(pattern, haystack):
+                    detections.append({
+                        'category': category,
+                        'ip': event.get('ip'),
+                        'timestamp': event.get('timestamp'),
+                        'path': event.get('path'),
+                    })
+                    break
+        return detections</code></pre>
+
+<p><strong>Pattern tip:</strong> <code>(?i)</code> makes matching case-insensitive. Start with precise patterns (known tool signatures) then add broader heuristics — loose patterns create false positives.</p>
+
+<h2>Step 3: Brute Force Detection via Time Windows</h2>
+<p>Not all attacks have obvious signatures. Detect brute force by tracking request frequency per IP over a sliding time window.</p>
+
+<pre><code>from collections import defaultdict
+from datetime import datetime, timedelta
+
+class RateBasedDetector:
+    def __init__(self, window_seconds=300, threshold=10):
+        self.window = timedelta(seconds=window_seconds)
+        self.threshold = threshold
+        self.attempts = defaultdict(list)
+
+    def feed(self, event):
+        ip = event.get('ip')
+        ts = event.get('timestamp')
+        path = event.get('url', '')
+        if 'login' not in path.lower() and event.get('method') != 'POST':
+            return None
+        self.attempts[ip].append(ts)
+        cutoff = ts - self.window
+        self.attempts[ip] = [t for t in self.attempts[ip] if t > cutoff]
+        count = len(self.attempts[ip])
+        if count >= self.threshold:
+            return {
+                'type': 'brute_force',
+                'ip': ip,
+                'count': count,
+                'window_seconds': self.window.total_seconds(),
+                'first_seen': self.attempts[ip][0],
+                'last_seen': ts,
+                'severity': 'high' if count >= self.threshold * 2 else 'medium',
+            }
+        return None</code></pre>
+
+<p>This sliding window prunes old entries automatically — you only alert when the <em>current</em> rate exceeds the threshold, no stale alerts from hours ago.</p>
+
+<h2>Step 4: Generate Alert Reports</h2>
+<p>Build a reporter that summarizes findings with severity levels, top attackers, and actionable context.</p>
+
+<pre><code>import json
+from collections import Counter, defaultdict
+
+class AlertReporter:
+    SEVERITY_MAP = {
+        'sqli': 'critical', 'cmd_injection': 'critical',
+        'lfi_rfi': 'high', 'xss': 'high',
+        'path_traversal': 'medium', 'scanner_ua': 'low',
+        'rate_limit': 'high',
+    }
+
+    def generate(self, detections, rate_alerts, total_events, time_range):
+        report = {
+            'generated_at': datetime.now().isoformat(),
+            'time_range': time_range,
+            'total_events': total_events,
+            'summary': {},
+            'alerts': [],
+        }
+        cats = defaultdict(lambda: {'count': 0, 'ips': set(), 'severity': 'low'})
+        for d in detections:
+            c = d['category']
+            cats[c]['count'] += 1
+            cats[c]['ips'].add(d['ip'])
+            cats[c]['severity'] = self.SEVERITY_MAP.get(c, 'low')
+
+        report['summary'] = {
+            cat: {'count': d['count'], 'unique_ips': len(d['ips']), 'severity': d['severity']}
+            for cat, d in sorted(cats.items(), key=lambda x: x[1]['count'], reverse=True)
+        }
+
+        for a in rate_alerts:
+            report['alerts'].append({
+                'type': 'brute_force', 'ip': a['ip'],
+                'attempts': a['count'], 'severity': a['severity'],
+                'message': f"{a['ip']} made {a['count']} login attempts in {a['window_seconds']}s",
+            })
+
+        ip_counter = Counter(d['ip'] for d in detections)
+        report['top_attackers'] = [{'ip': ip, 'count': c} for ip, c in ip_counter.most_common(10)]
+        return report
+
+    def print_report(self, report):
+        print("\\n" + "=" * 60)
+        print(f"  LOG ANALYSIS REPORT — {report['generated_at'][:19]}")
+        print("=" * 60)
+        print(f"  Events analyzed: {report['total_events']}")
+        if report['summary']:
+            for cat, d in report['summary'].items():
+                icon = {'critical': '🔴', 'high': '🟠', 'medium': '🟡', 'low': '🔵'}
+                print(f"  {icon.get(d['severity'], '⚪')} {cat.upper()}: {d['count']} hits from {d['unique_ips']} IPs [{d['severity']}]")
+        if report['top_attackers']:
+            print(f"\\n  Top attacking IPs:")
+            for e in report['top_attackers'][:5]:
+                print(f"     {e['ip']:20s} — {e['count']} events")
+        print("=" * 60)</code></pre>
+
+<h2>Step 5: Complete CLI Tool</h2>
+<p>Wire everything together with <code>argparse</code> for a production-ready command-line tool.</p>
+
+<pre><code>import sys, argparse
+
+def main():
+    parser = argparse.ArgumentParser(description="Web Log Analyzer & Intrusion Detector")
+    parser.add_argument("logfile", help="Path to Apache/Nginx access log")
+    parser.add_argument("-o", "--output", help="Output JSON report file")
+    parser.add_argument("-w", "--window", type=int, default=300, help="Rate window in seconds")
+    parser.add_argument("-t", "--threshold", type=int, default=10, help="Rate threshold")
+    parser.add_argument("--json", action="store_true", help="Output JSON")
+    args = parser.parse_args()
+
+    log_parser = LogParser()
+    attack_detector = AttackDetector()
+    rate_detector = RateBasedDetector(args.window, args.threshold)
+    reporter = AlertReporter()
+
+    all_detections, rate_alerts, events = [], [], []
+    with open(args.logfile, 'r', encoding='utf-8', errors='ignore') as f:
+        for line in f:
+            event = log_parser.parse_line(line)
+            if not event:
+                continue
+            events.append(event)
+            all_detections.extend(attack_detector.analyze(event))
+            alert = rate_detector.feed(event)
+            if alert:
+                rate_alerts.append(alert)
+
+    report = reporter.generate(all_detections, rate_alerts, len(events),
+                               f"{events[0]['timestamp']} → {events[-1]['timestamp']}")
+    if args.json and args.output:
+        with open(args.output, 'w') as f:
+            json.dump(report, f, default=str, indent=2)
+        print(f"Report saved to {args.output}")
+    else:
+        reporter.print_report(report)
+
+if __name__ == "__main__":
+    main()</code></pre>
+
+<h2>Testing Your Analyzer</h2>
+<p>Create a <code>sample.log</code> file with these test entries and run <code>python log_analyzer.py sample.log</code>:</p>
+
+<pre><code>192.168.1.100 - - [01/Jun/2025:12:00:01 +0000] "GET /products?id=1' UNION SELECT username,password FROM users-- HTTP/1.1" 200 450 "-" "sqlmap/1.7"
+10.0.0.5 - - [01/Jun/2025:12:01:00 +0000] "GET /search?q=&lt;script&gt;alert(1)&lt;/script&gt; HTTP/1.1" 200 300 "-" "Mozilla/5.0"
+172.16.0.1 - - [01/Jun/2025:12:02:00 +0000] "GET /../../etc/passwd HTTP/1.1" 403 150 "-" "curl/7.88"
+192.168.1.50 - - [01/Jun/2025:12:03:00 +0000] "GET /about HTTP/1.1" 200 2500 "-" "Mozilla/5.0"
+10.0.0.99 - - [01/Jun/2025:12:04:00 +0000] "POST /login HTTP/1.1" 401 200 "-" "python-requests/2.28"</code></pre>
+
+<h2>Extension Ideas</h2>
+<ul style="margin-left:var(--space-6);margin-bottom:var(--space-6);color:var(--color-text-secondary);">
+  <li>Add real-time log tailing with the <code>watchdog</code> library for live monitoring</li>
+  <li>Integrate IP reputation lookups via the AbuseIPDB or VirusTotal API</li>
+  <li>Build a Flask web dashboard with charts (attack timeline, top attackers, severity breakdown)</li>
+  <li>Add GeoIP enrichment using the <code>geoip2</code> library to detect attacks from unusual countries</li>
+  <li>Implement Slack/Discord webhook notifications for critical alerts</li>
+</ul>
+
+<h2>Resources & Next Steps</h2>
+<div style="display:flex;flex-direction:column;gap:var(--space-2);margin-bottom:var(--space-8);">
+  <a class="resource-link" href="https://owasp.org/www-project-top-ten/" target="_blank" rel="noopener">
+    <span class="resource-link-icon">&#x1F4D6;</span> OWASP Top 10 — Understand what you're detecting
+  </a>
+  <a class="resource-link" href="https://tryhackme.com/room/splunk101" target="_blank" rel="noopener">
+    <span class="resource-link-icon">&#x1F3AF;</span> TryHackMe: Splunk 101 — Professional SIEM tool
+  </a>
+  <a class="resource-link" href="https://attack.mitre.org/" target="_blank" rel="noopener">
+    <span class="resource-link-icon">&#x1F4DC;</span> MITRE ATT&CK — Map detections to adversary techniques
+  </a>
+  <a class="resource-link" href="https://github.com/Neo23x0/sigma" target="_blank" rel="noopener">
+    <span class="resource-link-icon">&#x1F4D8;</span> Sigma Rules — Universal detection rule format
+  </a>
+  <a class="resource-link" href="https://httpd.apache.org/docs/current/logs.html" target="_blank" rel="noopener">
+    <span class="resource-link-icon">&#x1F4D7;</span> Apache Log Files Documentation
+  </a>
+</div>
+
+<div class="callout">
+  <div class="callout-title">&#x1F393; Cert Relevance</div>
+  <p>This project directly supports <strong>CompTIA Security+</strong> (log analysis, SIEM concepts), <strong>CySA+</strong> (behavioral analytics, threat detection), and <strong>Blue Team Level 1 (BTL1)</strong> (log analysis, SIEM operations). The pattern-based detection mirrors professional SIEM rules used in SOC environments.</p>
+</div>
+
+</div>
+
+<script src="/assets/js/data.js"></script>
+<script src="/assets/js/theme.js"></script>
+<script src="/assets/js/components.js"></script>
+<script src="/assets/js/progress.js"></script>
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+  document.body.prepend(renderNav());
+  document.body.appendChild(renderFooter());
+  const btnContainer = document.getElementById('progressBtn');
+  if (btnContainer) btnContainer.appendChild(renderProgressButton('log-analyzer'));
+  initCopyButtons();
+});
+</script>
+</body>
+</html>

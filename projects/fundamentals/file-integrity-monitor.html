@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>File Integrity Monitor — sec-projects</title>
+  <meta name="description" content="Create a FIM tool that detects unauthorized file changes by comparing cryptographic hashes over time.">
+
+  <meta property="og:title" content="File Integrity Monitor — sec-projects">
+  <meta property="og:description" content="Detect unauthorized file changes using SHA-256 hash comparison — build your own FIM.">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://sec-projects.pages.dev/projects/fundamentals/file-integrity-monitor.html">
+
+  <link rel="canonical" href="https://sec-projects.pages.dev/projects/fundamentals/file-integrity-monitor.html">
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+  <link rel="stylesheet" href="/assets/css/theme.css">
+  <link rel="stylesheet" href="/assets/css/layout.css">
+  <link rel="stylesheet" href="/assets/css/components.css">
+</head>
+<body>
+  <div class="container" style="max-width:900px; margin: calc(var(--nav-height) + var(--space-8)) auto var(--space-8); padding: 0 var(--space-6);">
+
+    <div class="breadcrumbs">
+      <a href="/">Home</a>
+      <span class="breadcrumb-sep">/</span>
+      <a href="/?cat=fundamentals">Fundamentals</a>
+      <span class="breadcrumb-sep">/</span>
+      <span>File Integrity Monitor</span>
+    </div>
+
+    <div style="margin-bottom:var(--space-8);">
+      <div style="display:flex;align-items:center;gap:var(--space-4);flex-wrap:wrap;margin-bottom:var(--space-3);">
+        <span class="badge badge-beginner">Beginner</span>
+        <span style="color:var(--color-text-muted);font-size:var(--font-size-sm);">&#x23F1; 2-3 hours</span>
+      </div>
+      <h1 style="border-bottom:none;margin-bottom:var(--space-3);">File Integrity Monitor</h1>
+      <p style="font-size:var(--font-size-lg);color:var(--color-text-secondary);">Create a FIM tool that detects unauthorized file changes by comparing cryptographic hashes over time.</p>
+      <div style="display:flex;flex-wrap:wrap;gap:var(--space-2);margin-top:var(--space-3);">
+        <span class="tag">python</span>
+        <span class="tag">hashing</span>
+        <span class="tag">filesystem</span>
+      </div>
+    </div>
+
+    <div id="progressBtn" style="margin-bottom:var(--space-8);"></div>
+
+    <h2>Learning Objectives</h2>
+    <ul style="margin-left:var(--space-6);margin-bottom:var(--space-6);color:var(--color-text-secondary);">
+      <li>Understand how cryptographic hash functions (SHA-256) provide data integrity</li>
+      <li>Learn to recursively walk directory trees and hash every file</li>
+      <li>Store baseline hashes and compare them to detect modifications, additions, and deletions</li>
+      <li>Build a CLI tool with subcommands for professional workflow integration</li>
+      <li>Grasp why FIM is a foundational security monitoring control (PCI-DSS Req 11.5)</li>
+    </ul>
+
+    <h2>Prerequisites</h2>
+    <ul style="margin-left:var(--space-6);margin-bottom:var(--space-6);color:var(--color-text-secondary);">
+      <li>Python 3.8+ installed</li>
+      <li>Understanding of Python dictionaries and file I/O</li>
+      <li>Basic knowledge of what a hash function does</li>
+    </ul>
+
+    <div class="callout">
+      <div class="callout-title">&#x26A0; Ethics &amp; Legal</div>
+      <p>Only monitor files and directories you own or have authorization to scan. In production, FIM tools run with least-privilege accounts on systems you're responsible for.</p>
+    </div>
+
+    <h2>Step 1: File Hashing Engine</h2>
+    <p>Build the core hashing function. SHA-256 is the standard — avoid MD5 and SHA-1 for security purposes as they have known collision vulnerabilities.</p>
+
+    <pre><code>import hashlib
+import os
+from pathlib import Path
+
+def hash_file(filepath, algorithm='sha256'):
+    """Return hex digest of a file using the specified algorithm."""
+    hasher = hashlib.new(algorithm)
+
+    try:
+        with open(filepath, 'rb') as f:
+            # Read in 64KB chunks to handle files of any size
+            while chunk := f.read(65536):
+                hasher.update(chunk)
+        return hasher.hexdigest()
+    except (PermissionError, FileNotFoundError) as e:
+        print(f"  [!] Skipping {filepath}: {e}")
+        return None
+
+def hash_directory(directory, algorithm='sha256'):
+    """Walk a directory and hash every file. Returns {rel_path: hash}."""
+    file_hashes = {}
+    dir_path = Path(directory)
+
+    for filepath in dir_path.rglob('*'):
+        if filepath.is_file():
+            file_hash = hash_file(str(filepath), algorithm)
+            if file_hash:
+                rel = str(filepath.relative_to(dir_path))
+                file_hashes[rel] = file_hash
+
+    return file_hashes</code></pre>
+
+    <p><strong>Why chunked reading?</strong> Reading large files in 64KB blocks prevents memory exhaustion. A 4GB file gets hashed without ever loading more than 64KB into RAM.</p>
+
+    <h2>Step 2: Baseline Storage &amp; Comparison</h2>
+    <p>Store baseline hashes in JSON and implement the diff logic to detect three types of changes.</p>
+
+    <pre><code>import json
+from datetime import datetime
+
+BASELINE_FILE = "baseline.json"
+
+def create_baseline(directory, label=None):
+    """Hash a directory and save the snapshot."""
+    if label is None:
+        label = f"baseline-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+
+    hashes = hash_directory(directory)
+
+    snapshot = {
+        "label": label,
+        "directory": str(Path(directory).resolve()),
+        "timestamp": datetime.now().isoformat(),
+        "algorithm": "sha256",
+        "file_count": len(hashes),
+        "hashes": hashes
+    }
+
+    # Load existing baselines, append, and save
+    baselines = load_baselines()
+    baselines[label] = snapshot
+    save_baselines(baselines)
+
+    print(f"Baseline '{label}' created — {len(hashes)} files indexed")
+    return snapshot
+
+def load_baselines():
+    """Load all baselines from disk."""
+    if os.path.exists(BASELINE_FILE):
+        with open(BASELINE_FILE) as f:
+            return json.load(f)
+    return {}
+
+def save_baselines(data):
+    with open(BASELINE_FILE, 'w') as f:
+        json.dump(data, f, indent=2)</code></pre>
+
+    <h2>Step 3: Change Detection Engine</h2>
+    <p>Compare the current file state against a stored baseline to find modified, added, and deleted files.</p>
+
+    <pre><code>def scan_changes(directory, baseline_label):
+    """Compare current directory state to a baseline snapshot."""
+    baselines = load_baselines()
+
+    if baseline_label not in baselines:
+        print(f"No baseline named '{baseline_label}'")
+        print(f"Available: {', '.join(baselines.keys())}")
+        return
+
+    baseline = baselines[baseline_label]
+    baseline_hashes = baseline["hashes"]
+    current_hashes = hash_directory(directory)
+
+    # Detect changes
+    modified = []  # file exists in both, hash differs
+    added = []     # file exists now, not in baseline
+    deleted = []   # file was in baseline, not on disk now
+
+    for path, old_hash in baseline_hashes.items():
+        if path in current_hashes:
+            if current_hashes[path] != old_hash:
+                modified.append(path)
+        else:
+            deleted.append(path)
+
+    for path in current_hashes:
+        if path not in baseline_hashes:
+            added.append(path)
+
+    # Generate report
+    total = len(modified) + len(added) + len(deleted)
+    print(f"\n{'='*55}")
+    print(f"  FILE INTEGRITY SCAN — {baseline_label}")
+    print(f"  Baseline: {baseline['timestamp']}")
+    print(f"{'='*55}")
+
+    if total == 0:
+        print("  ✓ No changes detected — system integrity verified")
+        return
+
+    print(f"  ⚠ {total} change(s) detected:\n")
+
+    if modified:
+        print(f"  [MODIFIED] {len(modified)} file(s):")
+        for f in modified:
+            print(f"    • {f}")
+    if added:
+        print(f"  [ADDED]    {len(added)} file(s):")
+        for f in added:
+            print(f"    • {f}")
+    if deleted:
+        print(f"  [DELETED]  {len(deleted)} file(s):")
+        for f in deleted:
+            print(f"    • {f}")
+
+    print(f"{'='*55}\n")</code></pre>
+
+    <p><strong>Detection logic:</strong> Three categories cover every possible state transition. Modified = same path, different hash. Added = new path. Deleted = path missing.</p>
+
+    <h2>Step 4: Complete CLI Tool</h2>
+    <p>Wire everything together with <code>argparse</code> subcommands for a professional interface.</p>
+
+    <pre><code>import argparse
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="File Integrity Monitor — detect unauthorized changes"
+    )
+    sub = parser.add_subparsers(dest="cmd", help="Commands")
+
+    # baseline command
+    bl = sub.add_parser("baseline", help="Create a new baseline")
+    bl.add_argument("directory", help="Directory to monitor")
+    bl.add_argument("-n", "--name", help="Baseline label (auto-generated if omitted)")
+
+    # scan command
+    sc = sub.add_parser("scan", help="Scan for changes against a baseline")
+    sc.add_argument("directory", help="Directory to scan")
+    sc.add_argument("-b", "--baseline", required=True, help="Baseline label to compare against")
+
+    # list command
+    ls = sub.add_parser("list", help="List all baselines")
+
+    args = parser.parse_args()
+
+    if args.cmd == "baseline":
+        create_baseline(args.directory, args.name)
+    elif args.cmd == "scan":
+        scan_changes(args.directory, args.baseline)
+    elif args.cmd == "list":
+        baselines = load_baselines()
+        if not baselines:
+            print("No baselines found. Create one with: fim baseline <dir>")
+        else:
+            for label, data in baselines.items():
+                print(f"  {label} — {data['file_count']} files ({data['timestamp']})")
+    else:
+        parser.print_help()
+
+if __name__ == "__main__":
+    main()</code></pre>
+
+    <h2>Testing Your Monitor</h2>
+    <p>Create a test scenario that exercises all three change types:</p>
+    <pre><code># Set up test directory
+mkdir test_monitor && cd test_monitor
+echo "original content" > file1.txt
+echo "another file" > file2.txt
+
+# Create baseline
+python fim.py baseline . -n test-baseline
+
+# Simulate changes
+echo "MODIFIED content" > file1.txt       # modified
+echo "new file" > file3.txt                # added
+rm file2.txt                               # deleted
+
+# Scan for changes
+python fim.py scan . -b test-baseline
+# Expected: 3 changes — 1 modified, 1 added, 1 deleted</code></pre>
+
+    <h2>Extension Ideas</h2>
+    <ul style="margin-left:var(--space-6);margin-bottom:var(--space-6);color:var(--color-text-secondary);">
+      <li>Add <strong>real-time monitoring</strong> using <code>watchdog</code> library for instant alerts</li>
+      <li>Implement <strong>email/Slack notifications</strong> when changes are detected</li>
+      <li>Add <strong>scheduled scanning</strong> via cron or APScheduler</li>
+      <li>Build a <strong>web dashboard</strong> with Flask to view scan history and trends</li>
+      <li>Support <strong>exclude patterns</strong> (e.g., skip <code>.git/</code>, <code>__pycache__/</code>)</li>
+    </ul>
+
+    <h2>Resources &amp; Next Steps</h2>
+    <div style="display:flex;flex-direction:column;gap:var(--space-2);margin-bottom:var(--space-8);">
+      <a class="resource-link" href="https://docs.python.org/3/library/hashlib.html" target="_blank" rel="noopener">
+        <span class="resource-link-icon">&#x1F4D8;</span> Python hashlib — Cryptographic Hashing
+      </a>
+      <a class="resource-link" href="https://www.cisa.gov/topics/cybersecurity-best-practices" target="_blank" rel="noopener">
+        <span class="resource-link-icon">&#x1F6E1;</span> CISA Cybersecurity Best Practices
+      </a>
+      <a class="resource-link" href="https://csrc.nist.gov/publications/detail/sp/800-53/rev-5/final" target="_blank" rel="noopener">
+        <span class="resource-link-icon">&#x1F4DC;</span> NIST SP 800-53 — Security and Privacy Controls
+      </a>
+      <a class="resource-link" href="https://tryhackme.com/room/hashingcrypto101" target="_blank" rel="noopener">
+        <span class="resource-link-icon">&#x1F3AF;</span> TryHackMe: Hashing &amp; Crypto 101
+      </a>
+    </div>
+
+    <div class="callout">
+      <div class="callout-title">&#x1F393; Cert Relevance</div>
+      <p>File integrity monitoring is explicitly tested in <strong>CompTIA Security+</strong> (security monitoring, hashing) and required by <strong>PCI-DSS</strong> (Req 11.5). Understanding FIM is essential for <strong>CISA</strong> (monitoring controls) and <strong>CISSP</strong> (security operations domain).</p>
+    </div>
+
+  </div>
+
+  <script src="/assets/js/data.js"></script>
+  <script src="/assets/js/theme.js"></script>
+  <script src="/assets/js/components.js"></script>
+  <script src="/assets/js/progress.js"></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      document.body.prepend(renderNav());
+      document.body.appendChild(renderFooter());
+      const btnContainer = document.getElementById('progressBtn');
+      if (btnContainer) btnContainer.appendChild(renderProgressButton('file-integrity-monitor'));
+      initCopyButtons();
+    });
+  </script>
+</body>
+</html>

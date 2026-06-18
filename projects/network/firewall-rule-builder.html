@@ -1,0 +1,489 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Firewall Rule Generator — sec-projects</title>
+  <meta name="description" content="Create a tool that generates iptables/nftables rules from high-level policy descriptions — bridge policy and implementation.">
+
+  <meta property="og:title" content="Firewall Rule Generator — sec-projects">
+  <meta property="og:description" content="Generate iptables/nftables rules from high-level policy descriptions.">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://sec-projects.pages.dev/projects/network/firewall-rule-builder.html">
+
+  <link rel="canonical" href="https://sec-projects.pages.dev/projects/network/firewall-rule-builder.html">
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+  <link rel="stylesheet" href="/assets/css/theme.css">
+  <link rel="stylesheet" href="/assets/css/layout.css">
+  <link rel="stylesheet" href="/assets/css/components.css">
+</head>
+<body>
+  <div class="container" style="max-width:900px; margin: calc(var(--nav-height) + var(--space-8)) auto var(--space-8); padding: 0 var(--space-6);">
+
+    <div class="breadcrumbs">
+      <a href="/">Home</a>
+      <span class="breadcrumb-sep">/</span>
+      <a href="/?cat=network">Network Security</a>
+      <span class="breadcrumb-sep">/</span>
+      <span>Firewall Rule Generator</span>
+    </div>
+
+    <div style="margin-bottom:var(--space-8);">
+      <div style="display:flex;align-items:center;gap:var(--space-4);flex-wrap:wrap;margin-bottom:var(--space-3);">
+        <span class="badge badge-intermediate">Intermediate</span>
+        <span style="color:var(--color-text-muted);font-size:var(--font-size-sm);">&#x23F1; 3-4 hours</span>
+      </div>
+      <h1 style="border-bottom:none;margin-bottom:var(--space-3);">Firewall Rule Generator</h1>
+      <p style="font-size:var(--font-size-lg);color:var(--color-text-secondary);">Create a tool that generates iptables/nftables rules from high-level policy descriptions — bridge the gap between policy and implementation.</p>
+      <div style="display:flex;flex-wrap:wrap;gap:var(--space-2);margin-top:var(--space-3);">
+        <span class="tag">python</span>
+        <span class="tag">iptables</span>
+        <span class="tag">firewall</span>
+        <span class="tag">networking</span>
+      </div>
+    </div>
+
+    <div id="progressBtn" style="margin-bottom:var(--space-8);"></div>
+
+    <h2>Learning Objectives</h2>
+    <ul style="margin-left:var(--space-6);margin-bottom:var(--space-6);color:var(--color-text-secondary);">
+      <li>Understand iptables chains (INPUT, OUTPUT, FORWARD) and default policies</li>
+      <li>Parse high-level security policy rules into concrete firewall configurations</li>
+      <li>Detect rule conflicts, shadowed rules, and redundant entries</li>
+      <li>Apply least-privilege principles — default deny with explicit allows</li>
+      <li>Generate both iptables and nftables syntax from a single policy specification</li>
+    </ul>
+
+    <h2>Prerequisites</h2>
+    <ul style="margin-left:var(--space-6);margin-bottom:var(--space-6);color:var(--color-text-secondary);">
+      <li>Python 3.8+ (standard library only — no external dependencies required)</li>
+      <li>Understanding of TCP/UDP ports and common services</li>
+      <li>Familiarity with the iptables command-line syntax (helpful but not required)</li>
+    </ul>
+
+    <div class="callout">
+      <div class="callout-title">&#x26A0; Caution</div>
+      <p>Applying firewall rules can lock you out of a remote system. Always test generated rules in a VM first. Keep a rollback plan — save the current ruleset with <code>iptables-save > backup.rules</code> before applying changes.</p>
+    </div>
+
+    <h2>Step 1: Policy Parser & Rule Model</h2>
+    <p>Define a simple JSON/YAML-like policy format and parse it into a rule model. This is the bridge between human-readable policy and machine-generated firewall rules.</p>
+
+    <pre><code>#!/usr/bin/env python3
+"""Firewall Rule Generator — parse policy and generate iptables rules."""
+
+import json
+import argparse
+from dataclasses import dataclass, field
+from typing import List, Optional
+
+@dataclass
+class FirewallRule:
+    """Represents a single firewall rule."""
+    action: str          # "allow" or "deny"
+    protocol: str        # "tcp", "udp", "icmp", or "any"
+    port: Optional[int] = None
+    source: str = "0.0.0.0/0"
+    destination: str = "0.0.0.0/0"
+    comment: str = ""
+    chain: str = "INPUT"  # INPUT, OUTPUT, or FORWARD
+
+@dataclass
+class FirewallPolicy:
+    """High-level security policy specification."""
+    default_input: str = "DROP"
+    default_output: str = "ACCEPT"
+    default_forward: str = "DROP"
+    allow_loopback: bool = True
+    allow_established: bool = True
+    rules: List[FirewallRule] = field(default_factory=list)
+
+class PolicyParser:
+    """Parse a JSON policy file into a FirewallPolicy object."""
+
+    @staticmethod
+    def parse(json_path: str) -> FirewallPolicy:
+        with open(json_path) as f:
+            data = json.load(f)
+
+        policy = FirewallPolicy(
+            default_input=data.get("default_input", "DROP"),
+            default_output=data.get("default_output", "ACCEPT"),
+            default_forward=data.get("default_forward", "DROP"),
+            allow_loopback=data.get("allow_loopback", True),
+            allow_established=data.get("allow_established", True),
+        )
+
+        for rule_data in data.get("rules", []):
+            rule = FirewallRule(
+                action=rule_data["action"],
+                protocol=rule_data["protocol"],
+                port=rule_data.get("port"),
+                source=rule_data.get("source", "0.0.0.0/0"),
+                comment=rule_data.get("comment", ""),
+            )
+            policy.rules.append(rule)
+
+        return policy
+
+    @staticmethod
+    def validate(policy: FirewallPolicy) -> List[str]:
+        """Check policy for common issues. Returns list of warnings."""
+        warnings = []
+        allowed_ports = set()
+
+        for rule in policy.rules:
+            if rule.action == "allow" and rule.port:
+                allowed_ports.add((rule.protocol, rule.port))
+
+            # Check for overly permissive rules
+            if rule.source == "0.0.0.0/0" and rule.action == "allow":
+                if rule.port in (22, 3389):
+                    warnings.append(
+                        f"WARNING: Allowing {rule.protocol}/{rule.port} (SSH/RDP) from ANY source!"
+                    )
+
+        if not allowed_ports and policy.default_input == "DROP":
+            warnings.append("WARNING: Default INPUT is DROP with no allow rules. "
+                            "This will block ALL incoming traffic including SSH!")
+
+        return warnings</code></pre>
+
+    <h2>Step 2: iptables Rule Generator</h2>
+    <p>Transform the parsed policy into valid iptables commands. Handle rule ordering, connection tracking, and common services.</p>
+
+    <pre><code>class IPTablesGenerator:
+    """Generate iptables rules from a FirewallPolicy."""
+
+    # Common service port mappings for friendly names
+    SERVICE_PORTS = {
+        "ssh": 22, "http": 80, "https": 443, "dns": 53,
+        "ftp": 21, "smtp": 25, "pop3": 110, "imap": 143,
+        "mysql": 3306, "postgresql": 5432, "rdp": 3389,
+        "ldap": 389, "ldaps": 636, "ntp": 123,
+    }
+
+    def __init__(self, policy: FirewallPolicy, ipv6=False):
+        self.policy = policy
+        self.ipv6 = ipv6
+        self.cmd = "ip6tables" if ipv6 else "iptables"
+
+    def generate(self) -> List[str]:
+        """Generate the complete ruleset as a list of commands."""
+        rules = []
+
+        # 1. Default policies
+        rules.append(f"# Default policies")
+        rules.append(f"{self.cmd} -P INPUT {self.policy.default_input}")
+        rules.append(f"{self.cmd} -P OUTPUT {self.policy.default_output}")
+        rules.append(f"{self.cmd} -P FORWARD {self.policy.default_forward}")
+
+        # 2. Loopback
+        if self.policy.allow_loopback:
+            rules.append(f"\n# Allow loopback traffic")
+            rules.append(f"{self.cmd} -A INPUT -i lo -j ACCEPT")
+            rules.append(f"{self.cmd} -A OUTPUT -o lo -j ACCEPT")
+
+        # 3. Established/related connections
+        if self.policy.allow_established:
+            rules.append(f"\n# Allow established and related connections")
+            rules.append(
+                f"{self.cmd} -A INPUT -m conntrack "
+                f"--ctstate ESTABLISHED,RELATED -j ACCEPT"
+            )
+
+        # 4. User-defined rules
+        rules.append(f"\n# User-defined rules")
+        for i, rule in enumerate(self.policy.rules):
+            comment = f"  # {rule.comment}" if rule.comment else ""
+
+            if rule.action == "allow":
+                target = "ACCEPT"
+            elif rule.action == "deny":
+                target = "DROP"
+            else:
+                continue
+
+            cmd_parts = [f"{self.cmd} -A {rule.chain}"]
+
+            # Protocol
+            if rule.protocol != "any":
+                cmd_parts.append(f"-p {rule.protocol}")
+
+            # Source restriction
+            if rule.source != "0.0.0.0/0":
+                cmd_parts.append(f"-s {rule.source}")
+
+            # Port
+            if rule.port:
+                if rule.protocol in ("tcp", "udp"):
+                    cmd_parts.append(f"--dport {rule.port}")
+                # ICMP doesn't use ports; skip for icmp
+
+            cmd_parts.append(f"-j {target}")
+            rules.append(" ".join(cmd_parts) + comment)
+
+        # 5. Logging rule (optional)
+        rules.append(f"\n# Log dropped packets (optional — uncomment to enable)")
+        rules.append(f"# {self.cmd} -A INPUT -j LOG --log-prefix 'IPTABLES-DROP: ' --log-level 4")
+        rules.append(f"# {self.cmd} -A INPUT -j DROP  # explicit drop after log")
+
+        return rules
+
+    def generate_nftables(self) -> str:
+        """Experimental: generate nftables configuration."""
+        lines = ["#!/usr/sbin/nft -f", "", "flush ruleset", ""]
+        lines.append("table inet filter {")
+        lines.append("    chain input {")
+        lines.append(f"        type filter hook input priority 0; policy {self.policy.default_input.lower()};")
+        if self.policy.allow_loopback:
+            lines.append("        iif lo accept")
+        if self.policy.allow_established:
+            lines.append("        ct state established,related accept")
+        for rule in self.policy.rules:
+            if rule.action != "allow":
+                continue
+            proto = rule.protocol if rule.protocol != "any" else ""
+            port_str = f" dport {rule.port}" if rule.port else ""
+            lines.append(f"        {proto} dport {rule.port} accept  # {rule.comment}" if rule.port else f"        # {rule.comment}")
+        lines.append("    }")
+        lines.append("}")
+        return "\n".join(lines)
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Firewall Rule Generator")
+    parser.add_argument("policy", help="Path to policy JSON file")
+    parser.add_argument("-6", "--ipv6", action="store_true", help="Generate ip6tables rules")
+    parser.add_argument("--nft", action="store_true", help="Generate nftables config instead")
+    parser.add_argument("--validate", action="store_true", help="Only validate, don't generate")
+    parser.add_argument("-o", "--output", help="Write rules to file")
+    args = parser.parse_args()
+
+    policy = PolicyParser.parse(args.policy)
+    warnings = PolicyParser.validate(policy)
+
+    if warnings:
+        print("POLICY WARNINGS:")
+        for w in warnings:
+            print(f"  {w}")
+        print()
+
+    if args.validate:
+        print("[+] Policy validated.")
+        exit(0)
+
+    if args.nft:
+        gen = IPTablesGenerator(policy)
+        output = gen.generate_nftables()
+    else:
+        gen = IPTablesGenerator(policy, ipv6=args.ipv6)
+        output = "\n".join(gen.generate())
+
+    print(output)
+
+    if args.output:
+        with open(args.output, "w") as f:
+            f.write(output)
+        print(f"\n[+] Rules written to {args.output}")</code></pre>
+
+    <h2>Step 3: Rule Conflict Detector</h2>
+    <p>Add analysis that detects shadowed rules (a broad rule placed before a more specific one), redundant rules, and potential security gaps.</p>
+
+    <pre><code>from ipaddress import ip_network
+from collections import defaultdict
+
+class RuleAnalyzer:
+    """Analyze firewall rules for conflicts, redundancies, and gaps."""
+
+    def __init__(self, policy: FirewallPolicy):
+        self.policy = policy
+        self.issues = []
+
+    def analyze(self) -> List[dict]:
+        """Run all analysis checks. Returns list of issues found."""
+        self.issues = []
+        self._check_shadowed_rules()
+        self._check_redundant_rules()
+        self._check_security_gaps()
+        return self.issues
+
+    def _check_shadowed_rules(self):
+        """Detect rules that are unreachable because a broader rule above matches first."""
+        for i, rule_a in enumerate(self.policy.rules):
+            if rule_a.action != "allow":
+                continue
+            for j, rule_b in enumerate(self.policy.rules[i+1:], start=i+1):
+                # Check if rule_a shadows rule_b
+                # A shadows B if A's source is broader or equal AND A's port matches
+                if (rule_a.source == "0.0.0.0/0" or rule_a.source == rule_b.source) and \
+                   (rule_a.port == rule_b.port or rule_a.port is None) and \
+                   (rule_a.protocol == rule_b.protocol or rule_a.protocol == "any"):
+                    if rule_b.action == "allow":
+                        self.issues.append({
+                            "type": "shadowed",
+                            "severity": "warning",
+                            "rule_index": j,
+                            "shadowed_by": i,
+                            "message": f"Rule {j+1} ({rule_b.comment or 'no comment'}) "
+                                       f"is shadowed by rule {i+1} ({rule_a.comment or 'no comment'})"
+                        })
+
+    def _check_redundant_rules(self):
+        """Flag duplicate or near-duplicate rules."""
+        seen = set()
+        for i, rule in enumerate(self.policy.rules):
+            signature = (rule.chain, rule.protocol, rule.port, rule.source, rule.action)
+            if signature in seen:
+                self.issues.append({
+                    "type": "redundant",
+                    "severity": "info",
+                    "rule_index": i,
+                    "message": f"Rule {i+1} is a duplicate of an earlier rule"
+                })
+            seen.add(signature)
+
+    def _check_security_gaps(self):
+        """Check for common security gaps in the policy."""
+        # Check if SSH is allowed from anywhere
+        has_ssh_allowed = any(
+            r.action == "allow" and r.port == 22
+            for r in self.policy.rules
+        )
+        has_ssh_restricted = any(
+            r.action == "allow" and r.port == 22 and r.source != "0.0.0.0/0"
+            for r in self.policy.rules
+        )
+
+        if has_ssh_allowed and not has_ssh_restricted:
+            self.issues.append({
+                "type": "security_gap",
+                "severity": "critical",
+                "message": "SSH (port 22) is open to the entire internet. "
+                           "Consider restricting to specific IP ranges or using a VPN."
+            })
+
+        # Check for ICMP (ping) handling
+        has_icmp = any(r.protocol == "icmp" for r in self.policy.rules)
+        if not has_icmp and self.policy.default_input == "DROP":
+            self.issues.append({
+                "type": "security_gap",
+                "severity": "info",
+                "message": "No ICMP rules found. With default DROP policy, "
+                           "ping and path MTU discovery will be blocked."
+            })
+
+
+if __name__ == "__main__":
+    import json
+
+    # Example: analyze a policy
+    sample_policy = {
+        "default_input": "DROP",
+        "default_output": "ACCEPT",
+        "default_forward": "DROP",
+        "allow_loopback": True,
+        "allow_established": True,
+        "rules": [
+            {"action": "allow", "protocol": "tcp", "port": 22, "comment": "SSH"},
+            {"action": "allow", "protocol": "tcp", "port": 80, "comment": "HTTP"},
+            {"action": "allow", "protocol": "tcp", "port": 443, "comment": "HTTPS"},
+            {"action": "allow", "protocol": "tcp", "port": 22, "comment": "SSH duplicate"},
+        ]
+    }
+
+    with open("/tmp/test_policy.json", "w") as f:
+        json.dump(sample_policy, f)
+
+    policy = PolicyParser.parse("/tmp/test_policy.json")
+    analyzer = RuleAnalyzer(policy)
+    issues = analyzer.analyze()
+
+    print("RULE ANALYSIS:")
+    for issue in issues:
+        icon = {"critical": "🔴", "warning": "🟡", "info": "🔵"}.get(issue["severity"], "⚪")
+        print(f"  {icon} [{issue['type']}] {issue['message']}")</code></pre>
+
+    <h2>Testing Your Generator</h2>
+    <ul style="margin-left:var(--space-6);margin-bottom:var(--space-6);color:var(--color-text-secondary);">
+      <li><strong>Create a test web server policy:</strong> Allow ports 22, 80, 443; default deny everything else</li>
+      <li><strong>Verify syntax:</strong> Run <code>iptables-restore --test < generated.rules</code> to check syntax without applying</li>
+      <li><strong>Test in a VM:</strong> Apply the rules in a fresh VM and verify you can still SSH in, but other ports are blocked</li>
+      <li><strong>Test conflict detection:</strong> Create a policy with intentionally shadowed rules and verify the analyzer catches them</li>
+    </ul>
+
+    <pre><code># Example policy file: web_server_policy.json
+cat > web_policy.json << 'EOF'
+{
+  "default_input": "DROP",
+  "default_output": "ACCEPT",
+  "default_forward": "DROP",
+  "allow_loopback": true,
+  "allow_established": true,
+  "rules": [
+    {"action": "allow", "protocol": "tcp", "port": 22, "source": "192.168.1.0/24", "comment": "SSH from LAN only"},
+    {"action": "allow", "protocol": "tcp", "port": 80, "comment": "HTTP"},
+    {"action": "allow", "protocol": "tcp", "port": 443, "comment": "HTTPS"},
+    {"action": "allow", "protocol": "icmp", "comment": "Allow ping"}
+  ]
+}
+EOF
+
+# Generate rules
+python firewall_builder.py web_policy.json --validate
+python firewall_builder.py web_policy.json -o iptables_rules.sh</code></pre>
+
+    <h2>Extension Ideas</h2>
+    <ul style="margin-left:var(--space-6);margin-bottom:var(--space-6);color:var(--color-text-secondary);">
+      <li>Add support for UFW (Uncomplicated Firewall) and firewalld rule generation — three backends from one policy</li>
+      <li>Build an interactive CLI wizard that asks questions ("Which services should be public?") and generates the policy</li>
+      <li>Add rate limiting rules for SSH (e.g., limit to 5 connections per minute) and HTTP (DDoS mitigation)</li>
+      <li>Include geo-IP based rules — allow/block traffic by country using MaxMind GeoLite2</li>
+      <li>Add rule simulation: input a hypothetical packet (src/dst/proto/port) and the tool tells you whether it would be accepted or dropped</li>
+    </ul>
+
+    <h2>Resources & Next Steps</h2>
+    <div style="display:flex;flex-direction:column;gap:var(--space-2);margin-bottom:var(--space-8);">
+      <a class="resource-link" href="https://www.netfilter.org/documentation/" target="_blank" rel="noopener">
+        <span class="resource-link-icon">&#x1F4D6;</span> Netfilter/iptables Documentation
+      </a>
+      <a class="resource-link" href="https://wiki.nftables.org/" target="_blank" rel="noopener">
+        <span class="resource-link-icon">&#x1F4D8;</span> nftables Wiki
+      </a>
+      <a class="resource-link" href="https://www.digitalocean.com/community/tutorials/iptables-essentials-common-firewall-rules-and-commands" target="_blank" rel="noopener">
+        <span class="resource-link-icon">&#x1F4DC;</span> DigitalOcean: iptables Essentials
+      </a>
+      <a class="resource-link" href="https://cheatsheetseries.owasp.org/cheatsheets/Transaction_Authorization_Cheat_Sheet.html" target="_blank" rel="noopener">
+        <span class="resource-link-icon">&#x1F6E1;</span> OWASP Cheat Sheet Series
+      </a>
+      <a class="resource-link" href="https://access.redhat.com/documentation/en-us/red_hat_enterprise_linux/7/html/security_guide/sec-using-firewalls" target="_blank" rel="noopener">
+        <span class="resource-link-icon">&#x1F4D5;</span> Red Hat: Using Firewalls (RHEL 7 Security Guide)
+      </a>
+    </div>
+
+    <div class="callout">
+      <div class="callout-title">&#x1F393; Cert Relevance</div>
+      <p>Firewall configuration and rule management are core topics on <strong>CompTIA Security+</strong> (firewalls, ACLs, secure network architecture) and <strong>CompTIA Network+</strong> (ACL concepts, stateful vs. stateless). The policy-to-implementation mapping skill is directly tested in the <strong>CISSP</strong> (security architecture domain) and <strong>CCNA</strong> (access control lists). Understanding netfilter/iptables is also covered on the <strong>Linux+</strong> and <strong>LPIC-2</strong> exams.</p>
+    </div>
+
+  </div>
+
+  <script src="/assets/js/data.js"></script>
+  <script src="/assets/js/theme.js"></script>
+  <script src="/assets/js/components.js"></script>
+  <script src="/assets/js/progress.js"></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      document.body.prepend(renderNav());
+      document.body.appendChild(renderFooter());
+      const btnContainer = document.getElementById('progressBtn');
+      if (btnContainer) btnContainer.appendChild(renderProgressButton('firewall-rule-builder'));
+      initCopyButtons();
+    });
+  </script>
+</body>
+</html>

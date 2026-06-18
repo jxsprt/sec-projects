@@ -1,0 +1,454 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DNS Enumeration Tool — sec-projects</title>
+  <meta name="description" content="Perform DNS reconnaissance — enumerate A/AAAA/MX/NS/TXT records, zone transfers, and subdomain discovery.">
+
+  <meta property="og:title" content="DNS Enumeration Tool — sec-projects">
+  <meta property="og:description" content="Perform DNS reconnaissance with Python — enumerate records, zone transfers, and subdomains.">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://sec-projects.pages.dev/projects/network/dns-enum-tool.html">
+
+  <link rel="canonical" href="https://sec-projects.pages.dev/projects/network/dns-enum-tool.html">
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+  <link rel="stylesheet" href="/assets/css/theme.css">
+  <link rel="stylesheet" href="/assets/css/layout.css">
+  <link rel="stylesheet" href="/assets/css/components.css">
+</head>
+<body>
+  <div class="container" style="max-width:900px; margin: calc(var(--nav-height) + var(--space-8)) auto var(--space-8); padding: 0 var(--space-6);">
+
+    <div class="breadcrumbs">
+      <a href="/">Home</a>
+      <span class="breadcrumb-sep">/</span>
+      <a href="/?cat=network">Network Security</a>
+      <span class="breadcrumb-sep">/</span>
+      <span>DNS Enumeration Tool</span>
+    </div>
+
+    <div style="margin-bottom:var(--space-8);">
+      <div style="display:flex;align-items:center;gap:var(--space-4);flex-wrap:wrap;margin-bottom:var(--space-3);">
+        <span class="badge badge-beginner">Beginner</span>
+        <span style="color:var(--color-text-muted);font-size:var(--font-size-sm);">&#x23F1; 2-3 hours</span>
+      </div>
+      <h1 style="border-bottom:none;margin-bottom:var(--space-3);">DNS Enumeration Tool</h1>
+      <p style="font-size:var(--font-size-lg);color:var(--color-text-secondary);">Perform DNS reconnaissance — enumerate A/AAAA/MX/NS/TXT records, zone transfers, and subdomain discovery.</p>
+      <div style="display:flex;flex-wrap:wrap;gap:var(--space-2);margin-top:var(--space-3);">
+        <span class="tag">python</span>
+        <span class="tag">dns</span>
+        <span class="tag">recon</span>
+        <span class="tag">dnspython</span>
+      </div>
+    </div>
+
+    <div id="progressBtn" style="margin-bottom:var(--space-8);"></div>
+
+    <h2>Learning Objectives</h2>
+    <ul style="margin-left:var(--space-6);margin-bottom:var(--space-6);color:var(--color-text-secondary);">
+      <li>Understand DNS record types (A, AAAA, MX, NS, CNAME, TXT, SOA) and their reconnaissance value</li>
+      <li>Use the <code>dnspython</code> library to perform programmatic DNS queries</li>
+      <li>Attempt AXFR zone transfers and understand why misconfigured DNS servers are a security risk</li>
+      <li>Perform subdomain brute-force enumeration using wordlists</li>
+      <li>Perform reverse DNS lookups to map IP ranges to hostnames</li>
+    </ul>
+
+    <h2>Prerequisites</h2>
+    <ul style="margin-left:var(--space-6);margin-bottom:var(--space-6);color:var(--color-text-secondary);">
+      <li>Python 3.8+ with <code>pip install dnspython</code></li>
+      <li>Basic understanding of how DNS works (recursive vs authoritative queries)</li>
+      <li>A wordlist for subdomain brute-forcing (e.g., SecLists)</li>
+    </ul>
+
+    <div class="callout">
+      <div class="callout-title">&#x26A0; Ethics & Legal</div>
+      <p>Only enumerate DNS records for domains you own or have explicit permission to test. Aggressive DNS queries can trigger rate limiting, get your IP blocked, or be interpreted as reconnaissance for an attack. Zone transfer attempts against unauthorized targets are illegal.</p>
+    </div>
+
+    <h2>Step 1: DNS Record Enumerator</h2>
+    <p>Build the core tool that queries all common DNS record types for a target domain. Each record type reveals different reconnaissance data.</p>
+
+    <pre><code>#!/usr/bin/env python3
+"""DNS Enumeration — query all major record types for a domain."""
+
+import dns.resolver
+import dns.zone
+import dns.query
+import argparse
+import sys
+
+RECORD_TYPES = ["A", "AAAA", "MX", "NS", "CNAME", "TXT", "SOA", "CAA", "PTR"]
+
+class DNSEnumerator:
+    def __init__(self, domain, nameserver=None, timeout=3):
+        self.domain = domain
+        self.resolver = dns.resolver.Resolver()
+        self.resolver.timeout = timeout
+        self.resolver.lifetime = timeout
+        if nameserver:
+            self.resolver.nameservers = [nameserver]
+        self.results = {}
+
+    def query_all(self, record_types=None):
+        """Query all specified record types and return structured results."""
+        if record_types is None:
+            record_types = RECORD_TYPES
+
+        for rtype in record_types:
+            try:
+                answers = self.resolver.resolve(self.domain, rtype)
+                records = [str(rdata) for rdata in answers]
+                self.results[rtype] = records
+            except dns.resolver.NoAnswer:
+                self.results[rtype] = []
+            except dns.resolver.NXDOMAIN:
+                print(f"[-] Domain {self.domain} does not exist (NXDOMAIN)")
+                sys.exit(1)
+            except dns.resolver.NoNameservers:
+                self.results[rtype] = ["[ERROR] No nameservers available"]
+            except Exception as e:
+                self.results[rtype] = [f"[ERROR] {e}"]
+
+        return self.results
+
+    def report(self):
+        """Print a formatted report of DNS records found."""
+        print(f"\n{'='*55}")
+        print(f"  DNS ENUMERATION: {self.domain}")
+        print(f"{'='*55}")
+
+        for rtype, records in self.results.items():
+            if not records:
+                continue
+            print(f"\n  [{rtype}] ({len(records)} record(s))")
+            for rec in records:
+                print(f"    {rec}")
+
+        print(f"\n{'='*55}")
+
+    def try_zone_transfer(self):
+        """Attempt AXFR zone transfer against the domain's nameservers."""
+        print(f"\n[*] Attempting zone transfer (AXFR) for {self.domain}...")
+
+        # Get authoritative nameservers
+        try:
+            ns_answers = self.resolver.resolve(self.domain, "NS")
+            nameservers = [str(ns) for ns in ns_answers]
+            print(f"[*] Found {len(nameservers)} nameserver(s): {', '.join(nameservers)}")
+        except Exception as e:
+            print(f"[-] Could not resolve nameservers: {e}")
+            return None
+
+        zone_data = {}
+        for ns in nameservers:
+            try:
+                # Resolve nameserver hostname to IP if needed
+                ns_ip = str(dns.resolver.resolve(ns, "A")[0])
+                print(f"[*] Trying AXFR from {ns} ({ns_ip})...")
+
+                zone = dns.zone.from_xfr(
+                    dns.query.xfr(ns_ip, self.domain, timeout=10)
+                )
+                records = []
+                for name, node in zone.nodes.items():
+                    for rdataset in node.rdatasets:
+                        for rdata in rdataset:
+                            records.append(f"{name}.{self.domain}. {rdataset.rdtype} {rdata}")
+
+                zone_data[ns] = records
+                print(f"[!!!] ZONE TRANSFER SUCCESSFUL from {ns}! "
+                      f"Retrieved {len(records)} records.")
+
+            except dns.query.TransferError:
+                print(f"[-] Zone transfer REFUSED by {ns} (properly secured)")
+            except Exception as e:
+                print(f"[-] Zone transfer failed from {ns}: {e}")
+
+        if not zone_data:
+            print("[+] No zone transfers succeeded — nameservers are properly configured.")
+        return zone_data
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="DNS Enumeration Tool")
+    parser.add_argument("domain", help="Target domain (e.g., example.com)")
+    parser.add_argument("--ns", help="Use specific nameserver")
+    parser.add_argument("--axfr", action="store_true", help="Attempt zone transfer")
+    parser.add_argument("--timeout", type=int, default=3, help="Query timeout (seconds)")
+    args = parser.parse_args()
+
+    enumerator = DNSEnumerator(args.domain, nameserver=args.ns, timeout=args.timeout)
+    enumerator.query_all()
+    enumerator.report()
+
+    if args.axfr:
+        enumerator.try_zone_transfer()</code></pre>
+
+    <h2>Step 2: Subdomain Brute-Forcer</h2>
+    <p>Add subdomain discovery using a wordlist. This mimics tools like Gobuster and Sublist3r. DNS brute-forcing finds hidden subdomains that search engines haven't indexed.</p>
+
+    <pre><code>import dns.resolver
+import concurrent.futures
+import argparse
+import time
+
+class SubdomainBruteForcer:
+    def __init__(self, domain, wordlist_path, threads=20, timeout=2):
+        self.domain = domain
+        self.wordlist_path = wordlist_path
+        self.threads = threads
+        self.resolver = dns.resolver.Resolver()
+        self.resolver.timeout = timeout
+        self.resolver.lifetime = timeout
+        self.found = []
+
+    def load_wordlist(self):
+        """Load subdomain wordlist from file."""
+        with open(self.wordlist_path) as f:
+            words = [line.strip() for line in f if line.strip() and not line.startswith("#")]
+        print(f"[+] Loaded {len(words)} subdomain candidates from {self.wordlist_path}")
+        return words
+
+    def check_subdomain(self, subdomain):
+        """Resolve a single subdomain. Returns (subdomain, ips) or None."""
+        fqdn = f"{subdomain}.{self.domain}"
+        try:
+            answers = self.resolver.resolve(fqdn, "A")
+            ips = [str(r) for r in answers]
+            return (fqdn, ips)
+        except dns.resolver.NXDOMAIN:
+            return None
+        except dns.resolver.NoAnswer:
+            return None  # exists but no A record
+        except Exception:
+            return None
+
+    def run(self):
+        """Brute-force subdomains using thread pool."""
+        words = self.load_wordlist()
+        start = time.time()
+
+        print(f"[*] Brute-forcing {len(words)} subdomains with {self.threads} threads...\n")
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=self.threads) as executor:
+            futures = {executor.submit(self.check_subdomain, w): w for w in words}
+
+            for future in concurrent.futures.as_completed(futures):
+                result = future.result()
+                if result:
+                    fqdn, ips = result
+                    self.found.append((fqdn, ips))
+                    print(f"[+] {fqdn:<50} -> {', '.join(ips)}")
+
+        elapsed = time.time() - start
+        print(f"\n[*] Finished in {elapsed:.1f}s — Found {len(self.found)} subdomains.")
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Subdomain Brute-Forcer")
+    parser.add_argument("domain", help="Target domain")
+    parser.add_argument("-w", "--wordlist", required=True, help="Path to subdomain wordlist")
+    parser.add_argument("-t", "--threads", type=int, default=20, help="Thread count")
+    args = parser.parse_args()
+
+    brute = SubdomainBruteForcer(args.domain, args.wordlist, threads=args.threads)
+    brute.run()</code></pre>
+
+    <h2>Step 3: Reverse DNS & Complete CLI Tool</h2>
+    <p>Add reverse DNS lookups and combine everything into a single comprehensive tool.</p>
+
+    <pre><code>#!/usr/bin/env python3
+"""Complete DNS Enumeration Tool — records, zone transfer, subdomains, and reverse DNS."""
+
+import dns.resolver
+import dns.reversename
+import argparse
+import json
+import ipaddress
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+class DNSTool:
+    def __init__(self, timeout=3):
+        self.resolver = dns.resolver.Resolver()
+        self.resolver.timeout = timeout
+        self.resolver.lifetime = timeout
+
+    def reverse_dns(self, ip):
+        """Perform reverse DNS lookup on a single IP."""
+        try:
+            addr = dns.reversename.from_address(ip)
+            answers = self.resolver.resolve(addr, "PTR")
+            return (ip, [str(r) for r in answers])
+        except Exception:
+            return (ip, None)
+
+    def reverse_dns_range(self, cidr, threads=20):
+        """Perform reverse DNS on all IPs in a CIDR range."""
+        network = ipaddress.ip_network(cidr, strict=False)
+        ips = [str(ip) for ip in network.hosts()]
+        print(f"[*] Reverse DNS for {len(ips)} hosts in {cidr}...")
+
+        results = {}
+        with ThreadPoolExecutor(max_workers=threads) as executor:
+            futures = {executor.submit(self.reverse_dns, ip): ip for ip in ips}
+            for future in as_completed(futures):
+                ip, ptrs = future.result()
+                if ptrs:
+                    results[ip] = ptrs
+                    print(f"[+] {ip} -> {', '.join(ptrs)}")
+
+        return results
+
+    def query_record_type(self, domain, rtype):
+        """Query a single DNS record type for a domain."""
+        try:
+            answers = self.resolver.resolve(domain, rtype)
+            return [str(r) for r in answers]
+        except Exception:
+            return []
+
+    def full_enum(self, domain, subdomain_wordlist=None, try_axfr=False,
+                  reverse_cidr=None, output=None):
+        """Run complete DNS enumeration and save results."""
+        report = {"domain": domain, "records": {}, "subdomains": [], "reverse_dns": {}}
+
+        # Standard record enumeration
+        print(f"\n[*] Querying standard DNS records for {domain}...")
+        for rtype in ["A", "AAAA", "MX", "NS", "CNAME", "TXT", "SOA", "CAA"]:
+            records = self.query_record_type(domain, rtype)
+            if records:
+                report["records"][rtype] = records
+                print(f"  [{rtype}] {records[0]}{' ...' if len(records) > 1 else ''}")
+
+        # Zone transfer
+        if try_axfr:
+            print(f"\n[*] Attempting zone transfer...")
+            # (zone transfer logic from Step 1)
+            report["zone_transfer"] = "attempted"
+
+        # Subdomain brute-force
+        if subdomain_wordlist:
+            print(f"\n[*] Brute-forcing subdomains from {subdomain_wordlist}...")
+            with open(subdomain_wordlist) as f:
+                words = [l.strip() for l in f if l.strip() and not l.startswith("#")]
+            found = []
+            with ThreadPoolExecutor(max_workers=20) as executor:
+                futures = {}
+                for word in words:
+                    fqdn = f"{word}.{domain}"
+                    futures[executor.submit(self.query_record_type, fqdn, "A")] = fqdn
+                for future in as_completed(futures):
+                    fqdn = futures[future]
+                    ips = future.result()
+                    if ips:
+                        found.append({"host": fqdn, "ips": ips})
+                        print(f"  [+] {fqdn} -> {', '.join(ips)}")
+            report["subdomains"] = found
+
+        # Reverse DNS
+        if reverse_cidr:
+            print(f"\n[*] Reverse DNS sweep of {reverse_cidr}...")
+            report["reverse_dns"] = self.reverse_dns_range(reverse_cidr)
+
+        # Export
+        if output:
+            with open(output, "w") as f:
+                json.dump(report, f, indent=2)
+            print(f"\n[+] Report saved to {output}")
+
+        return report
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="DNS Enumeration Tool")
+    parser.add_argument("domain", help="Target domain")
+    parser.add_argument("-w", "--wordlist", help="Subdomain wordlist path")
+    parser.add_argument("--axfr", action="store_true", help="Attempt zone transfer")
+    parser.add_argument("-r", "--reverse", help="CIDR range for reverse DNS sweep")
+    parser.add_argument("-o", "--output", help="Save JSON report")
+    parser.add_argument("-t", "--timeout", type=int, default=3)
+    args = parser.parse_args()
+
+    tool = DNSTool(timeout=args.timeout)
+    tool.full_enum(
+        domain=args.domain,
+        subdomain_wordlist=args.wordlist,
+        try_axfr=args.axfr,
+        reverse_cidr=args.reverse,
+        output=args.output,
+    )</code></pre>
+
+    <h2>Testing Your Tool</h2>
+    <ul style="margin-left:var(--space-6);margin-bottom:var(--space-6);color:var(--color-text-secondary);">
+      <li><strong>Test on a domain you own:</strong> Point it at your own website — you should see your A, MX, and NS records</li>
+      <li><strong>Compare with <code>dig</code>:</strong> Run <code>dig example.com ANY</code> and verify your tool returns the same records</li>
+      <li><strong>Subdomain wordlist:</strong> Use a small custom wordlist first: <code>echo -e "www\nmail\nblog\ndev" > test.txt</code></li>
+      <li><strong>Zone transfer test:</strong> Your own nameserver should refuse AXFR — verify detection of failure message</li>
+    </ul>
+
+    <pre><code># Test record enumeration
+python dns_tool.py example.com
+
+# Test with subdomain brute-force
+echo -e "www\nmail\nftp\nadmin\ndev\napi" > subdomains.txt
+python dns_tool.py example.com -w subdomains.txt -o results.json
+
+# Compare with dig
+dig example.com A +short
+dig example.com MX +short</code></pre>
+
+    <h2>Extension Ideas</h2>
+    <ul style="margin-left:var(--space-6);margin-bottom:var(--space-6);color:var(--color-text-secondary);">
+      <li>Add DNS wildcard detection — identify domains where *.example.com resolves (which can hide real subdomains)</li>
+      <li>Implement DNSSEC validation to verify DNS record authenticity</li>
+      <li>Add take-over detection — check if resolved IPs point to cloud services where subdomain takeovers are possible (AWS S3, GitHub Pages, etc.)</li>
+      <li>Integrate passive DNS data from sources like SecurityTrails or VirusTotal APIs</li>
+      <li>Add visual output — generate a network graph showing how discovered subdomains and IPs relate</li>
+    </ul>
+
+    <h2>Resources & Next Steps</h2>
+    <div style="display:flex;flex-direction:column;gap:var(--space-2);margin-bottom:var(--space-8);">
+      <a class="resource-link" href="https://dnspython.readthedocs.io/" target="_blank" rel="noopener">
+        <span class="resource-link-icon">&#x1F4D6;</span> dnspython Documentation
+      </a>
+      <a class="resource-link" href="https://dnsdumpster.com/" target="_blank" rel="noopener">
+        <span class="resource-link-icon">&#x1F4E1;</span> DNSDumpster (Reference Recon Tool)
+      </a>
+      <a class="resource-link" href="https://tryhackme.com/room/passiverecon" target="_blank" rel="noopener">
+        <span class="resource-link-icon">&#x1F3AF;</span> TryHackMe: Passive Reconnaissance
+      </a>
+      <a class="resource-link" href="https://github.com/danielmiessler/SecLists" target="_blank" rel="noopener">
+        <span class="resource-link-icon">&#x1F4C4;</span> SecLists (Subdomain Wordlists)
+      </a>
+      <a class="resource-link" href="https://datatracker.ietf.org/doc/html/rfc1035" target="_blank" rel="noopener">
+        <span class="resource-link-icon">&#x1F4DC;</span> RFC 1035 — DNS Specification
+      </a>
+    </div>
+
+    <div class="callout">
+      <div class="callout-title">&#x1F393; Cert Relevance</div>
+      <p>DNS enumeration is a reconnaissance technique tested on <strong>CompTIA Security+</strong> (reconnaissance tools), <strong>eJPT</strong> (information gathering), and <strong>PNPT</strong> (external reconnaissance phase). Understanding DNS infrastructure is also relevant for the <strong>CCNA</strong> and <strong>Network+</strong> exams. Zone transfer attacks are specifically covered in the <strong>CEH</strong> certification.</p>
+    </div>
+
+  </div>
+
+  <script src="/assets/js/data.js"></script>
+  <script src="/assets/js/theme.js"></script>
+  <script src="/assets/js/components.js"></script>
+  <script src="/assets/js/progress.js"></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      document.body.prepend(renderNav());
+      document.body.appendChild(renderFooter());
+      const btnContainer = document.getElementById('progressBtn');
+      if (btnContainer) btnContainer.appendChild(renderProgressButton('dns-enum-tool'));
+      initCopyButtons();
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,447 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>JWT Token Analyzer — sec-projects</title>
+  <meta name="description" content="Decode and analyze JSON Web Tokens — inspect headers, payloads, signatures, and detect common JWT vulnerabilities.">
+
+  <meta property="og:title" content="JWT Token Analyzer — sec-projects">
+  <meta property="og:description" content="Decode and analyze JWT tokens — inspect headers, payloads, and detect common vulnerabilities.">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://sec-projects.pages.dev/projects/crypto/jwt-analyzer.html">
+
+  <link rel="canonical" href="https://sec-projects.pages.dev/projects/crypto/jwt-analyzer.html">
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+  <link rel="stylesheet" href="/assets/css/theme.css">
+  <link rel="stylesheet" href="/assets/css/layout.css">
+  <link rel="stylesheet" href="/assets/css/components.css">
+</head>
+<body>
+  <div class="container" style="max-width:900px; margin: calc(var(--nav-height) + var(--space-8)) auto var(--space-8); padding: 0 var(--space-6);">
+
+    <!-- Breadcrumbs -->
+    <div class="breadcrumbs">
+      <a href="/">Home</a>
+      <span class="breadcrumb-sep">/</span>
+      <a href="/?cat=crypto">Cryptography</a>
+      <span class="breadcrumb-sep">/</span>
+      <span>JWT Token Analyzer</span>
+    </div>
+
+    <!-- Header -->
+    <div style="margin-bottom:var(--space-8);">
+      <div style="display:flex;align-items:center;gap:var(--space-4);flex-wrap:wrap;margin-bottom:var(--space-3);">
+        <span class="badge badge-beginner">Beginner</span>
+        <span style="color:var(--color-text-muted);font-size:var(--font-size-sm);">&#x23F1; 1-2 hours</span>
+      </div>
+      <h1 style="border-bottom:none;margin-bottom:var(--space-3);">JWT Token Analyzer</h1>
+      <p style="font-size:var(--font-size-lg);color:var(--color-text-secondary);">Decode and analyze JSON Web Tokens — inspect headers, payloads, signatures, and detect common JWT vulnerabilities.</p>
+      <div style="display:flex;flex-wrap:wrap;gap:var(--space-2);margin-top:var(--space-3);">
+        <span class="tag">python</span>
+        <span class="tag">jwt</span>
+        <span class="tag">token-analysis</span>
+        <span class="tag">auth</span>
+      </div>
+    </div>
+
+    <!-- Progress Button -->
+    <div id="progressBtn" style="margin-bottom:var(--space-8);"></div>
+
+    <!-- Learning Objectives -->
+    <h2>Learning Objectives</h2>
+    <ul style="margin-left:var(--space-6);margin-bottom:var(--space-6);color:var(--color-text-secondary);">
+      <li>Understand JWT structure: <code>header.payload.signature</code> and how Base64URL encoding works</li>
+      <li>Learn to decode and inspect JWT claims — standard claims (iss, sub, exp, aud) and custom ones</li>
+      <li>Identify common JWT misconfigurations: <code>alg: none</code>, weak HMAC secrets, algorithm confusion</li>
+      <li>Differentiate between JWS (signed), JWE (encrypted), and plain JWTs</li>
+      <li>Build a tool useful for both developers debugging auth flows and security testers auditing APIs</li>
+    </ul>
+
+    <!-- Prerequisites -->
+    <h2>Prerequisites</h2>
+    <ul style="margin-left:var(--space-6);margin-bottom:var(--space-6);color:var(--color-text-secondary);">
+      <li>Python 3.8+ with <code>PyJWT</code> library (<code>pip install pyjwt</code>)</li>
+      <li>Basic understanding of Base64 encoding</li>
+      <li>Familiarity with JSON data format</li>
+      <li>Optional: <code>pyjwt[crypto]</code> for signature verification support</li>
+    </ul>
+
+    <!-- Step 1 -->
+    <h2>Step 1: Manual JWT Decoding</h2>
+    <p>Start by implementing your own JWT parser without any library. This teaches you the exact format: three Base64URL-encoded segments separated by dots.</p>
+
+    <pre><code>import base64
+import json
+
+def base64url_decode(data: str) -> bytes:
+    """Decode Base64URL (JWT's flavor — no padding, URL-safe chars)."""
+    # Add padding if needed (Base64 requires length % 4 == 0)
+    padding = 4 - (len(data) % 4)
+    if padding != 4:
+        data += "=" * padding
+    # Replace URL-safe characters
+    data = data.replace("-", "+").replace("_", "/")
+    return base64.b64decode(data)
+
+def decode_jwt_manual(token: str) -> dict:
+    """Manually decode a JWT into its three parts without signature verification."""
+
+    parts = token.split(".")
+    if len(parts) != 3:
+        raise ValueError(f"Invalid JWT: expected 3 parts, got {len(parts)}")
+
+    header_b64, payload_b64, signature_b64 = parts
+
+    # Decode header
+    header_bytes = base64url_decode(header_b64)
+    header = json.loads(header_bytes.decode("utf-8"))
+
+    # Decode payload
+    payload_bytes = base64url_decode(payload_b64)
+    payload = json.loads(payload_bytes.decode("utf-8"))
+
+    return {
+        "header": header,
+        "payload": payload,
+        "signature_b64": signature_b64,
+    }
+
+# Test with a sample token
+test_token = (
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9."
+    "eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ."
+    "SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"
+)
+
+decoded = decode_jwt_manual(test_token)
+print("Header:")
+print(json.dumps(decoded["header"], indent=2))
+print("\nPayload:")
+print(json.dumps(decoded["payload"], indent=2))
+print(f"\nSignature (raw): {decoded['signature_b64'][:40]}...")</code></pre>
+
+    <p><strong>Key insight:</strong> JWT is <em>not</em> encrypted by default — it's <strong>encoded and signed</strong>. Anyone can decode the payload. The signature only proves the token hasn't been tampered with. Never put secrets in a JWT payload!</p>
+
+    <!-- Step 2 -->
+    <h2>Step 2: Claims Analysis &amp; Expiry Check</h2>
+    <p>Parse the standard JWT claims (registered claim names) and check for common issues — expired tokens, missing claims, unusual values.</p>
+
+    <pre><code>from datetime import datetime, timezone, timedelta
+
+STANDARD_CLAIMS = {
+    "iss": "Issuer — who created this token",
+    "sub": "Subject — who this token is about (user ID)",
+    "aud": "Audience — who this token is intended for",
+    "exp": "Expiration Time — when it stops being valid (Unix timestamp)",
+    "nbf": "Not Before — when it starts being valid",
+    "iat": "Issued At — when the token was created",
+    "jti": "JWT ID — unique identifier for this token",
+}
+
+def analyze_claims(payload: dict) -> list:
+    """Analyze JWT claims and return a list of findings."""
+
+    findings = []
+    now = datetime.now(timezone.utc)
+    epoch = datetime(1970, 1, 1, tzinfo=timezone.utc)
+
+    # Check standard claims
+    for claim, description in STANDARD_CLAIMS.items():
+        if claim in payload:
+            value = payload[claim]
+
+            # Special handling for time-based claims
+            if claim in ("exp", "nbf", "iat"):
+                try:
+                    dt = epoch + timedelta(seconds=int(value))
+                    if claim == "exp":
+                        if dt < now:
+                            findings.append(("❌", f"TOKEN EXPIRED at {dt.isoformat()} ({int(value)})"))
+                        else:
+                            remaining = dt - now
+                            findings.append(("⏰", f"Expires at {dt.isoformat()} ({remaining.days}d {remaining.seconds//3600}h remaining)"))
+                    elif claim == "nbf":
+                        if dt > now:
+                            findings.append(("⏳", f"Not valid until {dt.isoformat()}"))
+                    elif claim == "iat":
+                        findings.append(("📅", f"Issued at {dt.isoformat()}"))
+                except (ValueError, OverflowError):
+                    findings.append(("⚠️", f"Invalid timestamp for '{claim}': {value}"))
+            else:
+                findings.append(("📋", f"{description}: {value}"))
+
+    # Missing critical claims
+    if "exp" not in payload:
+        findings.append(("⚠️", "No expiration claim — token never expires!"))
+    if "sub" not in payload:
+        findings.append(("⚠️", "No subject claim — which user is this?"))
+    if "iat" not in payload:
+        findings.append(("ℹ️", "No 'issued at' claim — can't determine token age"))
+
+    # Custom claims
+    custom = {k: v for k, v in payload.items() if k not in STANDARD_CLAIMS}
+    if custom:
+        findings.append(("🔧", f"Custom claims: {list(custom.keys())}"))
+
+    return findings
+
+# Test
+decoded = decode_jwt_manual(test_token)
+for icon, msg in analyze_claims(decoded["payload"]):
+    print(f"  {icon} {msg}")</code></pre>
+
+    <!-- Step 3 -->
+    <h2>Step 3: Vulnerability Detection</h2>
+    <p>The most valuable part: automatically detect common JWT security issues — some of which can lead to complete authentication bypass.</p>
+
+    <pre><code>def detect_vulnerabilities(header: dict, payload: dict, token: str) -> list:
+    """Detect common JWT vulnerabilities and misconfigurations."""
+
+    vulns = []
+    alg = header.get("alg", "").upper()
+
+    # Critical: "none" algorithm
+    if alg == "NONE":
+        vulns.append(("🔥 CRITICAL", "Algorithm is 'none' — token has NO signature! "
+                      "Anyone can forge tokens by removing the signature."))
+
+    # Weak HMAC secrets (indirect — we can check key hints)
+    if alg.startswith("HS"):
+        bits = alg[2:]
+        if bits in ("256", "384", "512"):
+            vulns.append(("ℹ️", f"HMAC-SHA{bits} used — key must be strong. "
+                          f"Try common secrets: 'secret', 'password', 'key'"))
+
+    # Algorithm confusion potential
+    if alg.startswith("RS") or alg.startswith("ES"):
+        vulns.append(("⚠️", f"Asymmetric algorithm ({alg}) — check if server accepts "
+                      f"algorithm switching to HS{256 if '256' in alg else '256'}. "
+                      f"If it does, you can forge tokens using the public key as HMAC secret."))
+
+    # Check if token has key ID
+    if "kid" in header:
+        vulns.append(("🔑", f"Key ID present: '{header['kid']}' — verify path traversal "
+                      f"or SQL injection isn't possible through kid value"))
+
+    # Check JWT type
+    if header.get("typ") != "JWT":
+        vulns.append(("⚠️", f"Unusual 'typ' value: {header.get('typ')}"))
+
+    # Empty signature check
+    parts = token.split(".")
+    if len(parts) == 3 and len(parts[2]) == 0:
+        vulns.append(("🔥 CRITICAL", "Empty signature — token is unsigned!"))
+
+    # Check for sensitive data in payload
+    sensitive_keys = ["password", "secret", "api_key", "token", "credit_card", "ssn"]
+    for key in sensitive_keys:
+        if key in payload:
+            vulns.append(("🚨", f"Sensitive data found in payload: '{key}'! "
+                          f"JWT payloads are NOT encrypted!"))
+
+    return vulns
+
+# Test
+decoded = decode_jwt_manual(test_token)
+vulns = detect_vulnerabilities(decoded["header"], decoded["payload"], test_token)
+for severity, msg in vulns:
+    print(f"  {severity}: {msg}")</code></pre>
+
+    <!-- Step 4 -->
+    <h2>Step 4: Signature Verification</h2>
+    <p>Use the <code>PyJWT</code> library to verify signatures — this is what distinguishes a real JWT implementation from a simple decoder.</p>
+
+    <pre><code>import jwt  # pip install pyjwt[crypto]
+
+def verify_jwt(token: str, secret: str = None, algorithms: list = None) -> dict:
+    """Verify a JWT signature and return decoded payload if valid."""
+
+    if algorithms is None:
+        algorithms = ["HS256", "HS384", "HS512", "RS256", "RS384", "RS512",
+                       "ES256", "ES384", "ES512", "PS256", "PS384", "PS512"]
+
+    try:
+        if secret:
+            decoded = jwt.decode(token, secret, algorithms=algorithms,
+                                options={"verify_exp": True})
+            return {"valid": True, "payload": decoded, "error": None}
+        else:
+            # Decode without verification (just parse)
+            decoded = jwt.decode(token, options={"verify_signature": False})
+            return {"valid": None, "payload": decoded,
+                    "error": "No secret provided — signature not verified"}
+
+    except jwt.ExpiredSignatureError:
+        return {"valid": False, "payload": None, "error": "Token has expired"}
+    except jwt.InvalidSignatureError:
+        return {"valid": False, "payload": None, "error": "Invalid signature"}
+    except jwt.InvalidTokenError as e:
+        return {"valid": False, "payload": None, "error": f"Invalid token: {e}"}
+
+# Test with correct secret
+correct_secret = "your-256-bit-secret"
+token = jwt.encode({"user": "alice", "admin": False}, correct_secret, algorithm="HS256")
+
+result = verify_jwt(token, correct_secret)
+print(f"With correct secret: {result['valid']}")
+
+result = verify_jwt(token, "wrong-secret")
+print(f"With wrong secret:   {result['valid']} — {result['error']}")</code></pre>
+
+    <!-- Step 5 -->
+    <h2>Step 5: Complete JWT Analyzer CLI</h2>
+    <p>Put it all together with an interactive CLI that can decode, analyze, and test JWTs.</p>
+
+    <pre><code>import argparse
+import sys
+import json
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="JWT Token Analyzer — decode, inspect, and find vulnerabilities"
+    )
+    parser.add_argument("token", nargs="?", help="JWT token string")
+    parser.add_argument("--secret", "-s", help="Secret/key for signature verification")
+    parser.add_argument("--color/--no-color", default=True, help="Colorized output")
+    parser.add_argument("--json", action="store_true", help="Output as JSON")
+    parser.add_argument("--stdin", action="store_true", help="Read token from stdin")
+
+    args = parser.parse_args()
+
+    # Get token
+    if args.stdin or not args.token:
+        token = sys.stdin.read().strip()
+    else:
+        token = args.token
+
+    if not token:
+        print("Error: No JWT token provided")
+        sys.exit(1)
+
+    print("=" * 65)
+    print("  JWT TOKEN ANALYZER")
+    print("=" * 65)
+    print(f"\nToken ({len(token)} chars): {token[:50]}...{token[-20:] if len(token) > 70 else ''}\n")
+
+    # Decode
+    try:
+        decoded = decode_jwt_manual(token)
+    except Exception as e:
+        print(f"❌ Failed to parse JWT: {e}")
+        sys.exit(1)
+
+    # Header
+    print("━" * 65)
+    print("  HEADER")
+    print("━" * 65)
+    print(json.dumps(decoded["header"], indent=2))
+
+    # Payload
+    print("\n" + "━" * 65)
+    print("  PAYLOAD")
+    print("━" * 65)
+    print(json.dumps(decoded["payload"], indent=2))
+
+    # Claims analysis
+    print("\n" + "━" * 65)
+    print("  CLAIMS ANALYSIS")
+    print("━" * 65)
+    for icon, msg in analyze_claims(decoded["payload"]):
+        print(f"  {icon} {msg}")
+
+    # Vulnerability scan
+    print("\n" + "━" * 65)
+    print("  VULNERABILITY SCAN")
+    print("━" * 65)
+    vulns = detect_vulnerabilities(decoded["header"], decoded["payload"], token)
+    if vulns:
+        for severity, msg in vulns:
+            print(f"  {severity}: {msg}")
+    else:
+        print("  ✅ No common vulnerabilities detected")
+
+    # Signature verification
+    if args.secret:
+        print("\n" + "━" * 65)
+        print("  SIGNATURE VERIFICATION")
+        print("━" * 65)
+        result = verify_jwt(token, args.secret)
+        if result["valid"]:
+            print(f"  ✅ Signature VALID using secret '{args.secret}'")
+        elif result["valid"] is False:
+            print(f"  ❌ Signature verification FAILED: {result['error']}")
+        else:
+            print(f"  ℹ️ {result['error']}")
+
+    print("\n" + "=" * 65)
+
+if __name__ == "__main__":
+    main()</code></pre>
+
+    <!-- Testing -->
+    <h2>Testing Your Analyzer</h2>
+    <p>Use these scenarios to verify your tool works correctly:</p>
+    <ul style="margin-left:var(--space-6);margin-bottom:var(--space-6);color:var(--color-text-secondary);">
+      <li><strong>Valid HS256 token:</strong> Generate at <a href="https://jwt.io/">jwt.io</a> with a known secret and verify</li>
+      <li><strong>Expired token:</strong> Create a token with <code>"exp": 1</code> (1970) — should flag as expired</li>
+      <li><strong>Algorithm none:</strong> Decode <code>eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0.eyJhZG1pbiI6dHJ1ZX0.</code> — should flag as critical</li>
+      <li><strong>Empty signature:</strong> <code>eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0In0.</code> — should detect</li>
+      <li><strong>Sensitive data:</strong> Create a token with <code>"password": "p@ssw0rd"</code> in the payload — should warn</li>
+    </ul>
+
+    <!-- Extensions -->
+    <h2>Extension Ideas</h2>
+    <ul style="margin-left:var(--space-6);margin-bottom:var(--space-6);color:var(--color-text-secondary);">
+      <li><strong>JWT brute-forcer:</strong> Dictionary attack against HMAC JWTs using common passwords as secrets</li>
+      <li><strong>Algorithm confusion exploit:</strong> Implement the actual RSA→HMAC downgrade attack against vulnerable servers</li>
+      <li><strong>JWK support:</strong> Fetch and use JSON Web Keys (JWK) from <code>/.well-known/jwks.json</code> for verification</li>
+      <li><strong>Burp Suite integration:</strong> Package your analyzer as a Burp extension for intercepting and analyzing JWTs in transit</li>
+      <li><strong>Token replay detector:</strong> Use <code>jti</code> claims to detect token reuse across requests</li>
+    </ul>
+
+    <!-- Resources -->
+    <h2>Resources &amp; Next Steps</h2>
+    <div style="display:flex;flex-direction:column;gap:var(--space-2);margin-bottom:var(--space-8);">
+      <a class="resource-link" href="https://jwt.io/" target="_blank" rel="noopener">
+        <span class="resource-link-icon">&#x1F6E0;</span> JWT.io — Online Debugger &amp; Playground
+      </a>
+      <a class="resource-link" href="https://portswigger.net/web-security/jwt" target="_blank" rel="noopener">
+        <span class="resource-link-icon">&#x1F3AF;</span> PortSwigger: JWT Attacks (Web Security Academy)
+      </a>
+      <a class="resource-link" href="https://datatracker.ietf.org/doc/html/rfc7519" target="_blank" rel="noopener">
+        <span class="resource-link-icon">&#x1F4DC;</span> RFC 7519 — JSON Web Token (JWT)
+      </a>
+      <a class="resource-link" href="https://pyjwt.readthedocs.io/" target="_blank" rel="noopener">
+        <span class="resource-link-icon">&#x1F4D8;</span> PyJWT Documentation
+      </a>
+    </div>
+
+    <!-- Cert Relevance -->
+    <div class="callout">
+      <div class="callout-title">&#x1F393; Cert Relevance</div>
+      <p>JWT security is heavily tested in <strong>eWPT (Web Penetration Testing)</strong> and the <strong>OSCP</strong> exam — algorithm confusion and <code>alg: none</code> attacks are classic web pentest findings. Understanding JWT claims maps directly to <strong>CompTIA Security+</strong> authentication and authorization objectives. For bug bounty hunters pursuing <strong>BSCP</strong> (Burp Suite Certified Practitioner), JWT analysis is a core skill tested on the exam.</p>
+    </div>
+
+  </div>
+
+  <!-- JS -->
+  <script src="/assets/js/data.js"></script>
+  <script src="/assets/js/theme.js"></script>
+  <script src="/assets/js/components.js"></script>
+  <script src="/assets/js/progress.js"></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      document.body.prepend(renderNav());
+      document.body.appendChild(renderFooter());
+      const btnContainer = document.getElementById('progressBtn');
+      if (btnContainer) btnContainer.appendChild(renderProgressButton('jwt-analyzer'));
+      initCopyButtons();
+    });
+  </script>
+</body>
+</html>

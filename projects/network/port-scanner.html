@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Port Scanner — sec-projects</title>
+  <meta name="description" content="Build a TCP port scanner in Python from scratch — learn socket programming, TCP handshakes, and service detection.">
+
+  <meta property="og:title" content="Port Scanner — sec-projects">
+  <meta property="og:description" content="Build a TCP port scanner in Python from scratch.">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://sec-projects.pages.dev/projects/network/port-scanner.html">
+
+  <link rel="canonical" href="https://sec-projects.pages.dev/projects/network/port-scanner.html">
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+  <link rel="stylesheet" href="/assets/css/theme.css">
+  <link rel="stylesheet" href="/assets/css/layout.css">
+  <link rel="stylesheet" href="/assets/css/components.css">
+</head>
+<body>
+  <!-- Content Area -->
+  <div class="container" style="max-width:900px; margin: calc(var(--nav-height) + var(--space-8)) auto var(--space-8); padding: 0 var(--space-6);">
+
+    <!-- Breadcrumbs -->
+    <div class="breadcrumbs">
+      <a href="/">Home</a>
+      <span class="breadcrumb-sep">/</span>
+      <a href="/?cat=network">Network Security</a>
+      <span class="breadcrumb-sep">/</span>
+      <span>Port Scanner</span>
+    </div>
+
+    <!-- Header -->
+    <div style="margin-bottom:var(--space-8);">
+      <div style="display:flex;align-items:center;gap:var(--space-4);flex-wrap:wrap;margin-bottom:var(--space-3);">
+        <span class="badge badge-beginner">Beginner</span>
+        <span style="color:var(--color-text-muted);font-size:var(--font-size-sm);">&#x23F1; 2-3 hours</span>
+      </div>
+      <h1 style="border-bottom:none;margin-bottom:var(--space-3);">Port Scanner</h1>
+      <p style="font-size:var(--font-size-lg);color:var(--color-text-secondary);">Build a TCP port scanner in Python from scratch — learn socket programming, TCP handshakes, and service detection.</p>
+      <div style="display:flex;flex-wrap:wrap;gap:var(--space-2);margin-top:var(--space-3);" id="skillTags">
+        <span class="tag">python</span>
+        <span class="tag">sockets</span>
+        <span class="tag">nmap</span>
+        <span class="tag">tcp</span>
+      </div>
+    </div>
+
+    <!-- Progress Button -->
+    <div id="progressBtn" style="margin-bottom:var(--space-8);"></div>
+
+    <!-- Learning Objectives -->
+    <h2>Learning Objectives</h2>
+    <ul style="margin-left:var(--space-6);margin-bottom:var(--space-6);color:var(--color-text-secondary);">
+      <li>Understand TCP connection establishment (SYN, SYN-ACK, ACK handshake)</li>
+      <li>Learn Python's <code>socket</code> module for network programming</li>
+      <li>Implement multi-threaded scanning for performance</li>
+      <li>Add service/version detection by banner grabbing</li>
+      <li>Compare your implementation with professional tools like Nmap</li>
+    </ul>
+
+    <!-- Prerequisites -->
+    <h2>Prerequisites</h2>
+    <ul style="margin-left:var(--space-6);margin-bottom:var(--space-6);color:var(--color-text-secondary);">
+      <li>Python 3.8+ installed</li>
+      <li>Basic understanding of TCP/IP (ports, IP addresses)</li>
+      <li>Familiarity with Python functions and exception handling</li>
+    </ul>
+
+    <div class="callout">
+      <div class="callout-title">&#x26A0; Ethics & Legal</div>
+      <p>Only scan systems you own or have explicit written permission to test. Unauthorized port scanning is illegal in most jurisdictions and can be detected by intrusion detection systems.</p>
+    </div>
+
+    <!-- Step 1 -->
+    <h2>Step 1: Basic Single-Port Scanner</h2>
+    <p>Start with a simple function that attempts a TCP connection to a single port. If the connection succeeds, the port is open.</p>
+
+    <pre><code>import socket
+import sys
+
+def scan_port(host, port):
+    """Attempt TCP connection to host:port. Returns True if open."""
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(1.0)  # 1 second timeout
+        result = sock.connect_ex((host, port))
+        sock.close()
+        return result == 0  # 0 = success, port open
+    except socket.gaierror:
+        print(f"Error: Could not resolve hostname '{host}'")
+        sys.exit(1)
+    except socket.error as e:
+        print(f"Socket error: {e}")
+        return False
+
+# Test it
+host = "scanme.nmap.org"  # Nmap's test server — safe to scan!
+port = 80
+if scan_port(host, port):
+    print(f"Port {port} on {host} is OPEN")
+else:
+    print(f"Port {port} on {host} is CLOSED")</code></pre>
+
+    <p><strong>Key concepts:</strong> <code>socket.AF_INET</code> for IPv4, <code>socket.SOCK_STREAM</code> for TCP, <code>connect_ex()</code> returns 0 on success (unlike <code>connect()</code> which raises an exception).</p>
+
+    <!-- Step 2 -->
+    <h2>Step 2: Scan a Range of Ports</h2>
+    <p>Extend the scanner to check multiple ports. We'll use common ports (1-1024) plus some well-known higher ports.</p>
+
+    <pre><code>def scan_port_range(host, start_port, end_port):
+    """Scan a range of ports on a host."""
+    open_ports = []
+
+    for port in range(start_port, end_port + 1):
+        if scan_port(host, port):
+            open_ports.append(port)
+            print(f"[+] Port {port} is OPEN")
+
+    return open_ports
+
+# Scan common ports
+host = "scanme.nmap.org"
+open_ports = scan_port_range(host, 1, 1024)
+print(f"\nOpen ports: {open_ports}")</code></pre>
+
+    <!-- Step 3 -->
+    <h2>Step 3: Add Threading for Speed</h2>
+    <p>Serial scanning is slow — each closed port wastes ~1 second on timeout. Use <code>concurrent.futures</code> to scan in parallel.</p>
+
+    <pre><code>import concurrent.futures
+
+def fast_scan(host, ports, max_workers=100):
+    """Scan ports concurrently using thread pool."""
+    open_ports = []
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_to_port = {
+            executor.submit(scan_port, host, port): port
+            for port in ports
+        }
+
+        for future in concurrent.futures.as_completed(future_to_port):
+            port = future_to_port[future]
+            try:
+                if future.result():
+                    open_ports.append(port)
+                    print(f"[+] Port {port} is OPEN")
+            except Exception as e:
+                print(f"[-] Error scanning port {port}: {e}")
+
+    return sorted(open_ports)
+
+# Scan top 1000 ports in parallel
+common_ports = list(range(1, 1001))
+open_ports = fast_scan("scanme.nmap.org", common_ports)</code></pre>
+
+    <!-- Step 4 -->
+    <h2>Step 4: Banner Grabbing (Service Detection)</h2>
+    <p>Once a port is open, try to identify the service by reading the banner it sends.</p>
+
+    <pre><code>COMMON_BANNER_PORTS = {
+    21: b"220",   # FTP
+    22: b"SSH",   # SSH
+    25: b"220",   # SMTP
+    80: b"GET / HTTP/1.0\r\n\r\n",  # HTTP
+    443: b"",     # HTTPS (needs TLS)
+}
+
+def grab_banner(host, port, timeout=2.0):
+    """Attempt to grab service banner from open port."""
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(timeout)
+        sock.connect((host, port))
+
+        # Send probe if we know what to send
+        probe = COMMON_BANNER_PORTS.get(port, b"")
+        if probe:
+            sock.send(probe)
+
+        banner = sock.recv(1024)
+        sock.close()
+        return banner.decode('utf-8', errors='ignore').strip()
+    except:
+        return None</code></pre>
+
+    <!-- Step 5 -->
+    <h2>Step 5: Complete CLI Tool</h2>
+    <p>Put it together with <code>argparse</code> for a professional command-line interface.</p>
+
+    <pre><code>import argparse
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="TCP Port Scanner — fast, threaded, with banner grabbing"
+    )
+    parser.add_argument("host", help="Target hostname or IP")
+    parser.add_argument("-p", "--ports", default="1-1000",
+                        help="Port range (e.g., '1-1000' or '22,80,443')")
+    parser.add_argument("-t", "--threads", type=int, default=100,
+                        help="Number of threads (default: 100)")
+    parser.add_argument("-b", "--banner", action="store_true",
+                        help="Enable banner grabbing")
+    parser.add_argument("--timeout", type=float, default=1.0,
+                        help="Connection timeout in seconds")
+
+    args = parser.parse_args()
+
+    # Parse port specification
+    if "," in args.ports:
+        ports = [int(p) for p in args.ports.split(",")]
+    elif "-" in args.ports:
+        start, end = args.ports.split("-")
+        ports = list(range(int(start), int(end) + 1))
+    else:
+        ports = [int(args.ports)]
+
+    print(f"\nScanning {args.host} ({len(ports)} ports)...\n")
+
+    open_ports = fast_scan(args.host, ports, args.threads)
+
+    if args.banner:
+        for port in sorted(open_ports):
+            banner = grab_banner(args.host, port)
+            if banner:
+                print(f"  Port {port}: {banner[:80]}")
+
+    print(f"\nDone. {len(open_ports)} open ports found.")
+
+if __name__ == "__main__":
+    main()</code></pre>
+
+    <!-- Testing -->
+    <h2>Testing Your Scanner</h2>
+    <p>Safe targets to test against:</p>
+    <ul style="margin-left:var(--space-6);margin-bottom:var(--space-6);color:var(--color-text-secondary);">
+      <li><strong>scanme.nmap.org</strong> — Nmap's official test server (ports 22, 80, 9929 typically open)</li>
+      <li><strong>localhost</strong> — scan your own machine</li>
+      <li><strong>A local VM</strong> — set up services in a controlled lab environment</li>
+    </ul>
+
+    <p>Verify your results against Nmap:</p>
+    <pre><code>nmap scanme.nmap.org -p 1-1000
+# Compare with your scanner's output</code></pre>
+
+    <!-- Extensions -->
+    <h2>Extension Ideas</h2>
+    <ul style="margin-left:var(--space-6);margin-bottom:var(--space-6);color:var(--color-text-secondary);">
+      <li>Add UDP scanning support</li>
+      <li>Implement SYN (half-open) scanning using raw sockets</li>
+      <li>Add OS fingerprinting using TTL and TCP window size analysis</li>
+      <li>Export results to JSON/CSV for reporting</li>
+      <li>Build a simple web dashboard to display scan results</li>
+    </ul>
+
+    <!-- Resources -->
+    <h2>Resources & Next Steps</h2>
+    <div style="display:flex;flex-direction:column;gap:var(--space-2);margin-bottom:var(--space-8);">
+      <a class="resource-link" href="https://nmap.org/book/" target="_blank" rel="noopener">
+        <span class="resource-link-icon">&#x1F4D6;</span> Nmap Network Scanning (Official Book)
+      </a>
+      <a class="resource-link" href="https://tryhackme.com/room/furthernmap" target="_blank" rel="noopener">
+        <span class="resource-link-icon">&#x1F3AF;</span> TryHackMe: Nmap Room
+      </a>
+      <a class="resource-link" href="https://docs.python.org/3/library/socket.html" target="_blank" rel="noopener">
+        <span class="resource-link-icon">&#x1F4D8;</span> Python socket Module Documentation
+      </a>
+      <a class="resource-link" href="https://datatracker.ietf.org/doc/html/rfc793" target="_blank" rel="noopener">
+        <span class="resource-link-icon">&#x1F4DC;</span> RFC 793 — Transmission Control Protocol
+      </a>
+    </div>
+
+    <!-- Cert Relevance -->
+    <div class="callout">
+      <div class="callout-title">&#x1F393; Cert Relevance</div>
+      <p>This project covers networking fundamentals tested on <strong>CompTIA Security+</strong> (ports & protocols) and <strong>eJPT</strong> (scanning & enumeration). Understanding TCP handshakes at this level puts you ahead for the PNPT practical exam.</p>
+    </div>
+
+  </div>
+
+  <!-- JS -->
+  <script src="/assets/js/data.js"></script>
+  <script src="/assets/js/theme.js"></script>
+  <script src="/assets/js/components.js"></script>
+  <script src="/assets/js/progress.js"></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      // Inject nav
+      document.body.prepend(renderNav());
+
+      // Inject footer
+      document.body.appendChild(renderFooter());
+
+      // Progress button
+      const btnContainer = document.getElementById('progressBtn');
+      if (btnContainer) {
+        btnContainer.appendChild(renderProgressButton('port-scanner'));
+      }
+
+      // Copy buttons
+      initCopyButtons();
+
+      // Highlight active nav
+      const navLink = document.querySelector('[data-nav="home"]');
+      if (navLink) navLink.classList.add('active');
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Directory Brute-Forcer — sec-projects</title>
+  <meta name="description" content="Build a tool to discover hidden directories and files on web servers using wordlist-based brute force.">
+  <meta property="og:title" content="Directory Brute-Forcer — sec-projects">
+  <meta property="og:description" content="Build a tool to discover hidden directories and files on web servers.">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://sec-projects.pages.dev/projects/web/dir-brute-forcer.html">
+  <link rel="canonical" href="https://sec-projects.pages.dev/projects/web/dir-brute-forcer.html">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/assets/css/theme.css">
+  <link rel="stylesheet" href="/assets/css/layout.css">
+  <link rel="stylesheet" href="/assets/css/components.css">
+</head>
+<body>
+<div class="container" style="max-width:900px; margin: calc(var(--nav-height) + var(--space-8)) auto var(--space-8); padding: 0 var(--space-6);">
+
+<div class="breadcrumbs">
+  <a href="/">Home</a><span class="breadcrumb-sep">/</span>
+  <a href="/?cat=web">Web Security</a><span class="breadcrumb-sep">/</span>
+  <span>Directory Brute-Forcer</span>
+</div>
+
+<div style="margin-bottom:var(--space-8);">
+  <div style="display:flex;align-items:center;gap:var(--space-4);flex-wrap:wrap;margin-bottom:var(--space-3);">
+    <span class="badge badge-beginner">Beginner</span>
+    <span style="color:var(--color-text-muted);font-size:var(--font-size-sm);">&#x23F1; 1-2 hours</span>
+  </div>
+  <h1 style="border-bottom:none;margin-bottom:var(--space-3);">Directory Brute-Forcer</h1>
+  <p style="font-size:var(--font-size-lg);color:var(--color-text-secondary);">Build a tool to discover hidden directories and files on web servers using wordlist-based brute force.</p>
+  <div style="display:flex;flex-wrap:wrap;gap:var(--space-2);margin-top:var(--space-3);">
+    <span class="tag">python</span><span class="tag">http</span><span class="tag">recon</span><span class="tag">enumeration</span>
+  </div>
+</div>
+
+<div id="progressBtn" style="margin-bottom:var(--space-8);"></div>
+
+<h2>Learning Objectives</h2>
+<ul style="margin-left:var(--space-6);margin-bottom:var(--space-6);color:var(--color-text-secondary);">
+  <li>Understand HTTP status codes (200, 301, 403, 404) and what they reveal about directory structure</li>
+  <li>Build a multi-threaded HTTP client for concurrent directory enumeration</li>
+  <li>Implement response analysis to reduce false positives (custom 404 pages, redirects)</li>
+  <li>Work with wordlists — load, filter, and generate directory paths</li>
+  <li>Add recursive discovery to map entire directory trees</li>
+</ul>
+
+<h2>Prerequisites</h2>
+<ul style="margin-left:var(--space-6);margin-bottom:var(--space-6);color:var(--color-text-secondary);">
+  <li>Python 3.8+ with <code>requests</code> installed</li>
+  <li>Basic HTTP knowledge (status codes, headers, URLs)</li>
+  <li>A wordlist file (SecLists recommended) or we'll generate a basic one</li>
+</ul>
+
+<div class="callout">
+  <div class="callout-title">&#x26A0; Ethics & Legal</div>
+  <p>Only brute-force directories on websites you own or have permission to test. Aggressive scanning generates noise in server logs and can trigger rate limiting or IP bans. Always respect <code>robots.txt</code> and add configurable delays between requests.</p>
+</div>
+
+<h2>Step 1: Basic Single-Threaded Brute-Forcer</h2>
+<p>Start with a simple loop that tries each wordlist entry against the target. This establishes the core logic before we optimize with threading.</p>
+
+<pre><code>import requests
+import sys
+
+class DirBruteForcer:
+    def __init__(self, base_url, wordlist_path, extensions=None):
+        self.base_url = base_url.rstrip('/')
+        self.extensions = extensions or ['']  # '' = no extension
+        self.session = requests.Session()
+        self.session.headers['User-Agent'] = (
+            'Mozilla/5.0 (compatible; DirBruteForcer/1.0; educational)'
+        )
+        self.results = []
+        self.baseline = None  # For false positive detection
+
+    def load_wordlist(self, path):
+        with open(path, 'r', encoding='utf-8', errors='ignore') as f:
+            return [line.strip() for line in f if line.strip()]
+
+    def get_baseline(self):
+        """Request a non-existent path to learn how 404s look."""
+        fake_url = f"{self.base_url}/_nonexistent_path_12345_"
+        try:
+            self.baseline = self.session.get(fake_url, timeout=10)
+        except:
+            self.baseline = None
+
+    def scan(self, wordlist_path):
+        words = self.load_wordlist(wordlist_path)
+        self.get_baseline()
+
+        for word in words:
+            for ext in self.extensions:
+                path = f"/{word}{ext}"
+                url = f"{self.base_url}{path}"
+                try:
+                    r = self.session.get(url, timeout=5, allow_redirects=False)
+                    if self._is_interesting(r, url):
+                        self.results.append({
+                            'url': url,
+                            'status': r.status_code,
+                            'content_length': len(r.content),
+                            'redirect_to': r.headers.get('Location', ''),
+                        })
+                        print(f"[{r.status_code}] {url} ({len(r.content)} bytes)")
+                except requests.RequestException:
+                    continue
+
+        return self.results
+
+    def _is_interesting(self, response, url):
+        """Filter out false positives."""
+        # Actual 404
+        if response.status_code == 404:
+            return False
+        # Redirects might be interesting
+        if response.status_code in (301, 302, 307, 308):
+            return True
+        # 200 OK - but check it's not a custom 404 page
+        if response.status_code == 200:
+            if self.baseline and response.status_code == self.baseline.status_code:
+                if abs(len(response.content) - len(self.baseline.content)) < 100:
+                    return False  # Same as 404 = custom error page
+            return True
+        # 401/403 = exists but access denied (interesting!)
+        if response.status_code in (401, 403):
+            return True
+        # 500 = might be interesting
+        if response.status_code in (500, 503):
+            return True
+        return False</code></pre>
+
+<p><strong>The baseline trick:</strong> By requesting a guaranteed non-existent URL first, we learn how the server behaves on 404s. Many sites return 200 with a "page not found" body — comparing content length helps filter them out.</p>
+
+<h2>Step 2: Multi-Threaded Speed Boost</h2>
+<p>Single-threaded scanning is slow. Use <code>ThreadPoolExecutor</code> to fire concurrent requests — but be responsible with rate limiting.</p>
+
+<pre><code>import concurrent.futures
+import time
+
+class ThreadedDirBruteForcer(DirBruteForcer):
+    def __init__(self, base_url, wordlist_path, extensions=None,
+                 threads=20, delay=0):
+        super().__init__(base_url, wordlist_path, extensions)
+        self.threads = threads
+        self.delay = delay  # seconds between requests per thread
+
+    def scan(self, wordlist_path):
+        words = self.load_wordlist(wordlist_path)
+        self.get_baseline()
+
+        # Build all URLs to test
+        urls_to_check = []
+        for word in words:
+            for ext in self.extensions:
+                path = f"/{word}{ext}"
+                urls_to_check.append({
+                    'url': f"{self.base_url}{path}",
+                    'word': word,
+                    'ext': ext,
+                })
+
+        print(f"\n[*] Scanning {len(urls_to_check)} paths with {self.threads} threads...\n")
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=self.threads) as executor:
+            futures = {executor.submit(self._check_url, entry): entry
+                      for entry in urls_to_check}
+
+            for future in concurrent.futures.as_completed(futures):
+                result = future.result()
+                if result:
+                    self.results.append(result)
+                    print(f"[{result['status']}] {result['url']} "
+                          f"({result['content_length']} bytes)")
+
+        self.results.sort(key=lambda x: x['status'])
+        return self.results
+
+    def _check_url(self, entry):
+        if self.delay:
+            time.sleep(self.delay)
+        try:
+            r = self.session.get(entry['url'], timeout=5,
+                                allow_redirects=False)
+            if self._is_interesting(r, entry['url']):
+                return {
+                    'url': entry['url'],
+                    'status': r.status_code,
+                    'content_length': len(r.content),
+                    'redirect_to': r.headers.get('Location', ''),
+                    'word': entry['word'],
+                }
+        except:
+            pass
+        return None</code></pre>
+
+<h2>Step 3: Recursive Discovery & Common Extensions</h2>
+<p>When you find a directory, recurse into it to build a full site map. Add extension fuzzing for backup files and common development artifacts.</p>
+
+<pre><code>BACKUP_EXTENSIONS = ['.bak', '.old', '.save', '.swp', '~', '.orig']
+DEV_EXTENSIONS = ['.php', '.asp', '.aspx', '.jsp', '.py', '.rb']
+CONFIG_FILES = ['.htaccess', '.gitignore', 'web.config', 'robots.txt']
+
+class RecursiveDirBruteForcer(ThreadedDirBruteForcer):
+    def __init__(self, *args, max_depth=3, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.max_depth = max_depth
+        self.visited = set()
+
+    def scan_recursive(self, wordlist_path, current_path='', depth=0):
+        if depth > self.max_depth:
+            return []
+
+        all_results = []
+        words = self.load_wordlist(wordlist_path)
+        base = f"{self.base_url}{current_path}"
+
+        # Check config files at each level
+        for config in CONFIG_FILES:
+            url = f"{base}/{config}"
+            try:
+                r = self.session.get(url, timeout=5)
+                if r.status_code in (200, 403):
+                    all_results.append({
+                        'url': url, 'status': r.status_code,
+                        'type': 'config_file', 'content_length': len(r.content),
+                    })
+            except:
+                pass
+
+        urls_to_check = []
+        for word in words:
+            for ext in self.extensions:
+                path = f"{current_path}/{word}{ext}"
+                urls_to_check.append({'url': f"{self.base_url}{path}", 'word': word, 'ext': ext})
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=self.threads) as executor:
+            futures = {executor.submit(self._check_url, e): e for e in urls_to_check}
+            for future in concurrent.futures.as_completed(futures):
+                result = future.result()
+                if result:
+                    result['depth'] = depth
+                    all_results.append(result)
+                    print(f"[{result['status']}] {result['url']}")
+
+                    # Recurse into directories
+                    if result['status'] in (200, 301, 302, 403) and '/' in result['url']:
+                        dir_path = result['url'].replace(self.base_url, '')
+                        if ('/' in dir_path[len(current_path)+1:] and
+                            dir_path not in self.visited):
+                            self.visited.add(dir_path)
+
+        return all_results</code></pre>
+
+<h2>Step 4: CLI with Reporting</h2>
+<p>Tie it together with a clean CLI and JSON report output.</p>
+
+<pre><code>import argparse, json
+from datetime import datetime
+
+def main():
+    parser = argparse.ArgumentParser(description="Directory Brute-Forcer")
+    parser.add_argument("url", help="Target URL")
+    parser.add_argument("-w", "--wordlist", required=True, help="Path to wordlist file")
+    parser.add_argument("-e", "--extensions", default="",
+                        help="Comma-separated extensions (e.g., php,txt,bak)")
+    parser.add_argument("-t", "--threads", type=int, default=20,
+                        help="Number of threads (default: 20)")
+    parser.add_argument("-d", "--delay", type=float, default=0,
+                        help="Delay between requests in seconds")
+    parser.add_argument("-r", "--recursive", action="store_true",
+                        help="Enable recursive scanning")
+    parser.add_argument("--max-depth", type=int, default=3,
+                        help="Max recursion depth (default: 3)")
+    parser.add_argument("-o", "--output", help="Save JSON report")
+    args = parser.parse_args()
+
+    extensions = args.extensions.split(',') if args.extensions else ['']
+
+    if args.recursive:
+        scanner = RecursiveDirBruteForcer(
+            args.url, args.wordlist, extensions,
+            threads=args.threads, delay=args.delay,
+            max_depth=args.max_depth
+        )
+        results = scanner.scan_recursive(args.wordlist)
+    else:
+        scanner = ThreadedDirBruteForcer(
+            args.url, args.wordlist, extensions,
+            threads=args.threads, delay=args.delay
+        )
+        results = scanner.scan(args.wordlist)
+
+    # Summary
+    status_counts = {}
+    for r in results:
+        status_counts[r['status']] = status_counts.get(r['status'], 0) + 1
+
+    print(f"\\n{'='*60}")
+    print(f"  SCAN COMPLETE — {len(results)} paths found")
+    for status, count in sorted(status_counts.items()):
+        print(f"  HTTP {status}: {count}")
+    print(f"{'='*60}")
+
+    if args.output:
+        report = {
+            'scan_time': datetime.now().isoformat(),
+            'target': args.url,
+            'total_found': len(results),
+            'status_counts': status_counts,
+            'results': results,
+        }
+        with open(args.output, 'w') as f:
+            json.dump(report, f, indent=2)
+        print(f"\\nReport saved to {args.output}")
+
+if __name__ == "__main__":
+    main()</code></pre>
+
+<h2>Testing Your Tool</h2>
+<p>Test against known targets and compare results with professional tools:</p>
+<pre><code># Generate a small wordlist for testing
+cat > test_words.txt << EOF
+admin
+login
+wp-admin
+api
+images
+css
+js
+config
+backup
+.git
+.env
+.htaccess
+test
+dev
+staging
+robots
+sitemap
+uploads
+includes
+vendor
+EOF
+
+# Run the scanner
+python dirbrute.py http://testphp.vulnweb.com -w test_words.txt -t 10
+
+# With extensions and recursive mode
+python dirbrute.py http://localhost:3000 -w /usr/share/wordlists/dirb/common.txt \
+  -e php,txt,bak -t 20 -r --max-depth 2
+
+# Compare with gobuster
+gobuster dir -u http://testphp.vulnweb.com -w test_words.txt</code></pre>
+
+<h2>Extension Ideas</h2>
+<ul style="margin-left:var(--space-6);margin-bottom:var(--space-6);color:var(--color-text-secondary);">
+  <li>Add content-based detection — scan response bodies for keywords like "admin panel", "phpMyAdmin"</li>
+  <li>Implement proxy support for routing through Burp Suite or ZAP</li>
+  <li>Add a "smart mode" that automatically adjusts thread count based on response times</li>
+  <li>Support custom HTTP headers (Authorization, custom User-Agent, cookies)</li>
+  <li>Add a resume feature — save progress and continue from where you left off</li>
+</ul>
+
+<h2>Resources & Next Steps</h2>
+<div style="display:flex;flex-direction:column;gap:var(--space-2);margin-bottom:var(--space-8);">
+  <a class="resource-link" href="https://github.com/danielmiessler/SecLists" target="_blank" rel="noopener">
+    <span class="resource-link-icon">&#x1F4DA;</span> SecLists — The definitive wordlist collection
+  </a>
+  <a class="resource-link" href="https://github.com/OJ/gobuster" target="_blank" rel="noopener">
+    <span class="resource-link-icon">&#x1F4D8;</span> Gobuster — The reference directory brute-forcer
+  </a>
+  <a class="resource-link" href="https://tryhackme.com/room/contentdiscovery" target="_blank" rel="noopener">
+    <span class="resource-link-icon">&#x1F3AF;</span> TryHackMe: Content Discovery
+  </a>
+  <a class="resource-link" href="https://portswigger.net/web-security/information-disclosure" target="_blank" rel="noopener">
+    <span class="resource-link-icon">&#x1F4D6;</span> PortSwigger: Information Disclosure
+  </a>
+  <a class="resource-link" href="https://github.com/ffuf/ffuf" target="_blank" rel="noopener">
+    <span class="resource-link-icon">&#x1F50D;</span> ffuf — Fast web fuzzer (Go-based alternative)
+  </a>
+</div>
+
+<div class="callout">
+  <div class="callout-title">&#x1F393; Cert Relevance</div>
+  <p>Directory enumeration is a core reconnaissance skill tested on <strong>eJPT</strong> (enumeration phase), <strong>OSCP</strong> (web reconnaissance), and <strong>PNPT</strong> (external enumeration). Understanding web server behavior from status codes is fundamental for <strong>CompTIA Security+</strong> and the <strong>Burp Suite Certified Practitioner</strong> exam.</p>
+</div>
+
+</div>
+
+<script src="/assets/js/data.js"></script>
+<script src="/assets/js/theme.js"></script>
+<script src="/assets/js/components.js"></script>
+<script src="/assets/js/progress.js"></script>
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+  document.body.prepend(renderNav());
+  document.body.appendChild(renderFooter());
+  const btnContainer = document.getElementById('progressBtn');
+  if (btnContainer) btnContainer.appendChild(renderProgressButton('dir-brute-forcer'));
+  initCopyButtons();
+});
+</script>
+</body>
+</html>

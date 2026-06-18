@@ -1,0 +1,214 @@
+/* ============================================================
+   sec-projects v2 — Theme System
+   CSS custom properties for dark & light themes
+   ============================================================ */
+
+:root {
+  /* === Color Palette === */
+  --color-bg:            #0a0e14;
+  --color-bg-secondary:  #12171f;
+  --color-bg-tertiary:   #1a1f2b;
+  --color-bg-hover:      #1e2433;
+  --color-border:        #252b38;
+  --color-border-strong: #323a4a;
+
+  --color-text-primary:   #e2e6ed;
+  --color-text-secondary: #9da4b0;
+  --color-text-muted:     #5c6472;
+
+  --color-accent:         #00d4aa;
+  --color-accent-hover:   #00e8bb;
+  --color-accent-dim:     rgba(0, 212, 170, 0.12);
+
+  --color-green:          #00d4aa;
+  --color-blue:           #58a6ff;
+  --color-yellow:         #d29922;
+  --color-orange:         #f0883e;
+  --color-red:            #f85149;
+  --color-purple:         #a371f7;
+
+  /* === Difficulty Badge Colors === */
+  --diff-beginner:       #00d4aa;
+  --diff-beginner-bg:    rgba(0, 212, 170, 0.12);
+  --diff-intermediate:   #d29922;
+  --diff-intermediate-bg: rgba(210, 153, 34, 0.12);
+  --diff-advanced:       #f0883e;
+  --diff-advanced-bg:    rgba(240, 136, 62, 0.12);
+  --diff-expert:         #f85149;
+  --diff-expert-bg:      rgba(248, 81, 73, 0.12);
+
+  /* === Typography === */
+  --font-sans:   'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-mono:   'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+  --font-size-xs:   0.75rem;
+  --font-size-sm:   0.875rem;
+  --font-size-base: 1rem;
+  --font-size-lg:   1.125rem;
+  --font-size-xl:   1.375rem;
+  --font-size-2xl:  1.75rem;
+  --font-size-3xl:  2.25rem;
+
+  /* === Spacing === */
+  --space-1:  0.25rem;
+  --space-2:  0.5rem;
+  --space-3:  0.75rem;
+  --space-4:  1rem;
+  --space-5:  1.25rem;
+  --space-6:  1.5rem;
+  --space-8:  2rem;
+  --space-10: 2.5rem;
+  --space-12: 3rem;
+  --space-16: 4rem;
+
+  /* === Borders & Radius === */
+  --radius-sm:   6px;
+  --radius-md:   10px;
+  --radius-lg:   16px;
+  --radius-full: 9999px;
+
+  /* === Shadows === */
+  --shadow-sm:   0 1px 3px rgba(0,0,0,0.3);
+  --shadow-md:   0 4px 12px rgba(0,0,0,0.4);
+  --shadow-lg:   0 8px 30px rgba(0,0,0,0.5);
+  --shadow-glow: 0 0 20px rgba(0, 212, 170, 0.15);
+
+  /* === Transitions === */
+  --transition-fast: 150ms ease;
+  --transition-base: 250ms ease;
+  --transition-slow: 400ms ease;
+
+  /* === Layout === */
+  --max-width:      1280px;
+  --nav-height:     64px;
+  --sidebar-width:  260px;
+}
+
+/* === Light Theme Overrides === */
+[data-theme="light"] {
+  --color-bg:            #f5f6f8;
+  --color-bg-secondary:  #ffffff;
+  --color-bg-tertiary:   #eef0f3;
+  --color-bg-hover:      #e4e7ec;
+  --color-border:        #d8dbe3;
+  --color-border-strong: #c4c8d2;
+
+  --color-text-primary:   #1a1d24;
+  --color-text-secondary: #4a505c;
+  --color-text-muted:     #7c8290;
+
+  --color-accent:         #008b6e;
+  --color-accent-hover:   #006b54;
+  --color-accent-dim:     rgba(0, 139, 110, 0.1);
+
+  --color-blue:          #1a6fce;
+  --color-yellow:        #a1781a;
+  --color-orange:        #c45a1e;
+  --color-red:           #c92a2a;
+
+  --diff-beginner:        #008b6e;
+  --diff-beginner-bg:     rgba(0, 139, 110, 0.1);
+  --diff-intermediate:    #a1781a;
+  --diff-intermediate-bg: rgba(161, 120, 26, 0.1);
+  --diff-advanced:        #c45a1e;
+  --diff-advanced-bg:     rgba(196, 90, 30, 0.1);
+  --diff-expert:          #c92a2a;
+  --diff-expert-bg:       rgba(201, 42, 42, 0.1);
+
+  --shadow-sm:   0 1px 3px rgba(0,0,0,0.08);
+  --shadow-md:   0 4px 12px rgba(0,0,0,0.1);
+  --shadow-lg:   0 8px 30px rgba(0,0,0,0.12);
+  --shadow-glow: 0 0 20px rgba(0, 139, 110, 0.1);
+}
+
+/* === Reset & Base === */
+*, *::before, *::after {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html {
+  font-size: 16px;
+  scroll-behavior: smooth;
+}
+
+body {
+  font-family: var(--font-sans);
+  font-size: var(--font-size-base);
+  line-height: 1.7;
+  color: var(--color-text-primary);
+  background: var(--color-bg);
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  transition: background var(--transition-base), color var(--transition-base);
+}
+
+/* === Typography === */
+h1, h2, h3, h4, h5, h6 {
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--color-text-primary);
+}
+
+h1 { font-size: var(--font-size-3xl); letter-spacing: -0.02em; }
+h2 { font-size: var(--font-size-2xl); letter-spacing: -0.01em; }
+h3 { font-size: var(--font-size-xl); }
+h4 { font-size: var(--font-size-lg); }
+
+p { margin-bottom: var(--space-4); color: var(--color-text-secondary); }
+
+a {
+  color: var(--color-accent);
+  text-decoration: none;
+  transition: color var(--transition-fast);
+}
+a:hover { color: var(--color-accent-hover); }
+
+code {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  background: var(--color-bg-tertiary);
+  padding: 0.15em 0.4em;
+  border-radius: 4px;
+  color: var(--color-green);
+}
+
+pre {
+  font-family: var(--font-mono);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-6);
+  overflow-x: auto;
+  margin-bottom: var(--space-6);
+  position: relative;
+}
+
+pre code {
+  background: none;
+  padding: 0;
+  color: var(--color-text-primary);
+}
+
+/* === Selection === */
+::selection {
+  background: var(--color-accent-dim);
+  color: var(--color-accent);
+}
+
+/* === Scrollbar === */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: var(--color-bg); }
+::-webkit-scrollbar-thumb {
+  background: var(--color-border-strong);
+  border-radius: var(--radius-full);
+}
+::-webkit-scrollbar-thumb:hover { background: var(--color-text-muted); }
+
+/* === Utility === */
+.sr-only {
+  position: absolute; width: 1px; height: 1px;
+  padding: 0; margin: -1px; overflow: hidden;
+  clip: rect(0,0,0,0); border: 0;
+}
