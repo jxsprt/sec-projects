@@ -1,2 +1,118 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Resources — sec-projects</title>
+  <meta name="description" content="Curated cybersecurity resources — free training, CTF platforms, YouTube channels, books, communities.">
+  <meta property="og:title" content="Resources — sec-projects">
+  <meta property="og:description" content="Curated cybersecurity resources — free training, CTF platforms, YouTube channels, books, communities.">
+  <meta property="og:type" content="website">
   <meta property="og:url" content="https://cyberlab.jaspreetsec.com/resources/links.html">
   <link rel="canonical" href="https://cyberlab.jaspreetsec.com/resources/links.html">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/assets/css/theme.css">
+  <link rel="stylesheet" href="/assets/css/layout.css">
+  <link rel="stylesheet" href="/assets/css/components.css">
+  <style>
+    .res-category { margin-bottom: var(--space-8); }
+    .res-category h2 { font-size: var(--font-size-xl); margin-bottom: var(--space-4); }
+  </style>
+</head>
+<body>
+  <div class="container" style="max-width:900px; margin: calc(var(--nav-height) + var(--space-8)) auto var(--space-8); padding: 0 var(--space-6);">
+    <div class="breadcrumbs">
+      <a href="/">Home</a> <span class="breadcrumb-sep">/</span> <span>Resources</span>
+    </div>
+
+    <h1>Curated Resources</h1>
+    <p style="font-size:var(--font-size-lg);color:var(--color-text-secondary);margin-bottom:var(--space-8);">
+      The best free and low-cost resources for learning cybersecurity — organized so you spend less time searching and more time learning.
+    </p>
+
+    <!-- Free Training Platforms -->
+    <div class="res-category">
+      <h2>&#x1F3AF; Free Training & Labs</h2>
+      <a class="resource-link" href="https://tryhackme.com/hacktivities" target="_blank" rel="noopener"><span class="resource-link-icon">&#x1F3AE;</span> TryHackMe — Guided rooms from complete beginner to advanced. Start with the free tier.</a>
+      <a class="resource-link" href="https://www.hackthebox.com/hacker/starting-point" target="_blank" rel="noopener"><span class="resource-link-icon">&#x1F9E0;</span> Hack The Box Starting Point — Free beginner-friendly machines with walkthroughs.</a>
+      <a class="resource-link" href="https://picoctf.org/" target="_blank" rel="noopener"><span class="resource-link-icon">&#x1F3C6;</span> PicoCTF — Carnegie Mellon's CTF designed for high school/college students. Great archives.</a>
+      <a class="resource-link" href="https://overthewire.org/wargames/" target="_blank" rel="noopener"><span class="resource-link-icon">&#x1F5F3;</span> OverTheWire — Classic wargames. Start with Bandit (Linux basics) then Leviathan, Natas (web).</a>
+      <a class="resource-link" href="https://portswigger.net/web-security" target="_blank" rel="noopener"><span class="resource-link-icon">&#x1F393;</span> PortSwigger Web Security Academy — Free, comprehensive web security training by Burp Suite creators.</a>
+      <a class="resource-link" href="https://www.vulnhub.com/" target="_blank" rel="noopener"><span class="resource-link-icon">&#x1F4E6;</span> VulnHub — Downloadable vulnerable VMs to practice on locally.</a>
+      <a class="resource-link" href="https://cyberdefenders.org/" target="_blank" rel="noopener"><span class="resource-link-icon">&#x1F6E1;</span> CyberDefenders — Blue team / DFIR challenges with PCAP and memory analysis.</a>
+    </div>
+
+    <!-- Cert Prep -->
+    <div class="res-category">
+      <h2>&#x1F4DC; Certification Prep</h2>
+      <a class="resource-link" href="https://www.professormesser.com/" target="_blank" rel="noopener"><span class="resource-link-icon">&#x1F4FA;</span> Professor Messer — Free Security+, Network+, A+ video courses. The gold standard.</a>
+      <a class="resource-link" href="https://www.udemy.com/user/jason-dion/" target="_blank" rel="noopener"><span class="resource-link-icon">&#x1F4DA;</span> Jason Dion (Udemy) — Practice exams for Security+, CySA+, CASP+. Wait for Udemy sales ($15-20).</a>
+      <a class="resource-link" href="https://tcm-sec.com/" target="_blank" rel="noopener"><span class="resource-link-icon">&#x1F4AA;</span> TCM Security — Practical Ethical Hacking, PNPT prep. Affordable and hands-on.</a>
+      <a class="resource-link" href="https://elearnsecurity.com/" target="_blank" rel="noopener"><span class="resource-link-icon">&#x1F310;</span> INE / eLearnSecurity — eJPT, eCPPT training. Free tier has good basics.</a>
+    </div>
+
+    <!-- YouTube -->
+    <div class="res-category">
+      <h2>&#x1F3AC; YouTube Channels</h2>
+      <a class="resource-link" href="https://www.youtube.com/@NetworkChuck" target="_blank" rel="noopener"><span class="resource-link-icon">&#x2601;</span> NetworkChuck — High-energy networking and cybersecurity content. Great for beginners.</a>
+      <a class="resource-link" href="https://www.youtube.com/@JohnHammond" target="_blank" rel="noopener"><span class="resource-link-icon">&#x1F50D;</span> John Hammond — CTF walkthroughs, malware analysis, practical tutorials.</a>
+      <a class="resource-link" href="https://www.youtube.com/@IppSec" target="_blank" rel="noopener"><span class="resource-link-icon">&#x1F9E0;</span> IppSec — In-depth Hack The Box walkthroughs. Learn methodology from a master.</a>
+      <a class="resource-link" href="https://www.youtube.com/@davidbombal" target="_blank" rel="noopener"><span class="resource-link-icon">&#x1F4E1;</span> David Bombal — Networking, GNS3 labs, ethical hacking interviews.</a>
+      <a class="resource-link" href="https://www.youtube.com/@LiveOverflow" target="_blank" rel="noopener"><span class="resource-link-icon">&#x1F4BB;</span> LiveOverflow — Deep technical dives into binary exploitation, reverse engineering.</a>
+      <a class="resource-link" href="https://www.youtube.com/@TheCyberMentor" target="_blank" rel="noopener"><span class="resource-link-icon">&#x1F393;</span> The Cyber Mentor — Full ethical hacking courses, PNPT-related content.</a>
+    </div>
+
+    <!-- CTF Platforms -->
+    <div class="res-category">
+      <h2>&#x1F3C6; CTF Platforms</h2>
+      <a class="resource-link" href="https://ctftime.org/" target="_blank" rel="noopener"><span class="resource-link-icon">&#x1F4C5;</span> CTFtime — Calendar of upcoming CTFs + team rankings and writeups.</a>
+      <a class="resource-link" href="https://play.picoctf.org/" target="_blank" rel="noopener"><span class="resource-link-icon">&#x1F3AE;</span> PicoCTF Practice — Archived challenges from past competitions.</a>
+      <a class="resource-link" href="https://www.hackthebox.com/" target="_blank" rel="noopener"><span class="resource-link-icon">&#x1F9E0;</span> Hack The Box — Active machines, challenges, and competitive Pro Labs.</a>
+      <a class="resource-link" href="https://tryhackme.com/" target="_blank" rel="noopener"><span class="resource-link-icon">&#x1F3AF;</span> TryHackMe — Guided learning paths with built-in attack boxes.</a>
+    </div>
+
+    <!-- Books -->
+    <div class="res-category">
+      <h2>&#x1F4DA; Books & Reading</h2>
+      <a class="resource-link" href="https://nostarch.com/catalog/security" target="_blank" rel="noopener"><span class="resource-link-icon">&#x1F4D5;</span> No Starch Press Security Catalog — Best technical publisher for security books.</a>
+      <a class="resource-link" href="https://www.amazon.com/Web-Application-Hackers-Handbook-Exploiting/dp/1118026470" target="_blank" rel="noopener"><span class="resource-link-icon">&#x1F4D8;</span> The Web Application Hacker's Handbook — Still relevant for web security fundamentals.</a>
+      <a class="resource-link" href="https://www.amazon.com/Penetration-Testing-Hands-Introduction-Hacking/dp/1593275641" target="_blank" rel="noopener"><span class="resource-link-icon">&#x1F4D7;</span> Penetration Testing (Georgia Weidman) — Practical intro to pentesting methodology.</a>
+      <a class="resource-link" href="https://www.amazon.com/Hacking-Art-Exploitation-Jon-Erickson/dp/1593271441" target="_blank" rel="noopener"><span class="resource-link-icon">&#x1F4D9;</span> Hacking: The Art of Exploitation — Deep C, assembly, and exploitation fundamentals.</a>
+    </div>
+
+    <!-- Communities -->
+    <div class="res-category">
+      <h2>&#x1F91D; Communities & Discord</h2>
+      <a class="resource-link" href="https://discord.gg/tryhackme" target="_blank" rel="noopener"><span class="resource-link-icon">&#x1F4AC;</span> TryHackMe Discord — Active community, room discussions, and mentorship.</a>
+      <a class="resource-link" href="https://discord.gg/hackthebox" target="_blank" rel="noopener"><span class="resource-link-icon">&#x1F4AC;</span> Hack The Box Discord — Machine discussions (no spoilers), labs, and support.</a>
+      <a class="resource-link" href="https://www.reddit.com/r/cybersecurity/" target="_blank" rel="noopener"><span class="resource-link-icon">&#x1F310;</span> r/cybersecurity — News, career advice, discussions.</a>
+      <a class="resource-link" href="https://www.reddit.com/r/netsec/" target="_blank" rel="noopener"><span class="resource-link-icon">&#x1F310;</span> r/netsec — Technical security research and papers.</a>
+      <a class="resource-link" href="https://www.reddit.com/r/netsecstudents/" target="_blank" rel="noopener"><span class="resource-link-icon">&#x1F393;</span> r/netsecstudents — Student-focused security discussions and study groups.</a>
+    </div>
+
+    <!-- News -->
+    <div class="res-category">
+      <h2>&#x1F4F0; News & Threat Intel</h2>
+      <a class="resource-link" href="https://thehackernews.com/" target="_blank" rel="noopener"><span class="resource-link-icon">&#x1F4F0;</span> The Hacker News — Daily cybersecurity news.</a>
+      <a class="resource-link" href="https://www.bleepingcomputer.com/" target="_blank" rel="noopener"><span class="resource-link-icon">&#x1F4BB;</span> BleepingComputer — Breaking security news, ransomware coverage, tutorials.</a>
+      <a class="resource-link" href="https://krebsonsecurity.com/" target="_blank" rel="noopener"><span class="resource-link-icon">&#x1F575;</span> Krebs on Security — Investigative security journalism by Brian Krebs.</a>
+      <a class="resource-link" href="https://feedly.com/i/top/cybersecurity" target="_blank" rel="noopener"><span class="resource-link-icon">&#x1F4E1;</span> Feedly Cybersecurity — Aggregate RSS feeds from top security blogs.</a>
+    </div>
+
+  </div>
+
+  <script src="/assets/js/data.js"></script>
+  <script src="/assets/js/theme.js"></script>
+  <script src="/assets/js/components.js"></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      document.body.prepend(renderNav());
+      document.body.appendChild(renderFooter());
+      const navLink = document.querySelector('[data-nav="links"]');
+      if (navLink) navLink.classList.add('active');
+    });
+  </script>
+</body>
+</html>
