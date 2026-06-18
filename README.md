@@ -4,7 +4,7 @@
 
 [![Projects](https://img.shields.io/badge/projects-32-brightgreen)](#-project-catalog)
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
-[![Deploy](https://img.shields.io/badge/deploy-Cloudflare%20Pages-orange)](https://sec-projects.pages.dev)
+[![Deploy](https://img.shields.io/badge/deploy-Cloudflare%20Pages-orange)](https://cyberlab.jaspreetsec.com)
 
 **Live site:** [cyberlab.jaspreetsec.com](https://cyberlab.jaspreetsec.com)
 
@@ -56,7 +56,7 @@ Projects are mapped to certification paths:
 | **Blue Team** | Sec+ → CySA+ → BTL1 → CISSP | Log Analyzer, ARP Spoof Detector, SIEM Dashboard, YARA Rules |
 | **Generalist** | Sec+ → Net+ → CEH → CISSP | Encrypted Vault, Firewall Builder, RSA Generator, XSS Playground |
 
-See [Learning Paths](https://sec-projects.pages.dev/resources/learning-paths.html) for detailed cert-to-project mapping.
+See [Learning Paths](https://cyberlab.jaspreetsec.com/resources/learning-paths.html) for detailed cert-to-project mapping.
 
 ---
 
@@ -94,8 +94,8 @@ No dependencies. No build step. Just HTML, CSS, and vanilla JavaScript.
 
 Curated external resources to accelerate your learning:
 
-- **[Tools Guide](https://sec-projects.pages.dev/resources/tools.html)** — Cheat sheets for Nmap, Wireshark, Burp Suite, Metasploit, Linux CLI
-- **[Resource Directory](https://sec-projects.pages.dev/resources/links.html)** — Free training, CTF platforms, YouTube channels, books, communities
+- **[Tools Guide](https://cyberlab.jaspreetsec.com/resources/tools.html)** — Cheat sheets for Nmap, Wireshark, Burp Suite, Metasploit, Linux CLI
+- **[Resource Directory](https://cyberlab.jaspreetsec.com/resources/links.html)** — Free training, CTF platforms, YouTube channels, books, communities
 
 ---
 
