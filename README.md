@@ -6,7 +6,7 @@
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![Deploy](https://img.shields.io/badge/deploy-Cloudflare%20Pages-orange)](https://sec-projects.pages.dev)
 
-**Live site:** [sec-projects.pages.dev](https://sec-projects.pages.dev)
+**Live site:** [cyberlab.jaspreetsec.com](https://cyberlab.jaspreetsec.com)
 
 ---
 
