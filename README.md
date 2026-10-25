@@ -1,4 +1,4 @@
-# sec-projects
+# Cyber Lab
 
 > **Hands-on cybersecurity projects — from beginner to expert.** Build real tools, learn real skills.
 
@@ -10,7 +10,7 @@
 
 ---
 
-## What is sec-projects?
+## What is Cyber Lab?
 
 A curated collection of 32 cybersecurity projects with step-by-step implementation guides, real code examples, and curated learning resources. Every project is self-contained — pick one, build it, learn the concepts.
 

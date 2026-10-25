@@ -1,5 +1,5 @@
 // ============================================================
-// sec-projects v2 — Search & Filter Engine
+// Cyber Lab v2 — Search & Filter Engine
 // Real-time search + multi-facet filtering + URL state
 // ============================================================
 

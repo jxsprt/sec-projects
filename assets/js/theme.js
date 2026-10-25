@@ -1,5 +1,5 @@
 // ============================================================
-// sec-projects v2 — Theme Toggle
+// Cyber Lab v2 — Theme Toggle
 // Dark/light theme with localStorage persistence + system preference
 // ============================================================
 

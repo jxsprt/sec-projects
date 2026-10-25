@@ -3,15 +3,15 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>YARA Rule Writer & Scanner — sec-projects</title>
+  <title>YARA Rule Writer & Scanner — Cyber Lab</title>
   <meta name="description" content="Write custom YARA rules to detect malware patterns and scan files/directories — foundational skill for malware analysis.">
 
-  <meta property="og:title" content="YARA Rule Writer & Scanner — sec-projects">
+  <meta property="og:title" content="YARA Rule Writer & Scanner — Cyber Lab">
   <meta property="og:description" content="Write custom YARA rules to detect malware patterns and scan files.">
   <meta property="og:type" content="article">
-  <meta property="og:url" content="https://sec-projects.pages.dev/projects/forensics/yara-rule-writer.html">
+  <meta property="og:url" content="https://cyberlab.jaspreetsec.com/projects/forensics/yara-rule-writer.html">
 
-  <link rel="canonical" href="https://sec-projects.pages.dev/projects/forensics/yara-rule-writer.html">
+  <link rel="canonical" href="https://cyberlab.jaspreetsec.com/projects/forensics/yara-rule-writer.html">
 
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -89,7 +89,7 @@
 rule PE_File {
     meta:
         description = "Detects Windows PE (Portable Executable) files"
-        author = "sec-projects"
+        author = "Cyber Lab"
         date = "2025-01-01"
         reference = "https://en.wikipedia.org/wiki/Portable_Executable"
 
@@ -405,7 +405,7 @@ class YARARuleGenerator:
         lines.append(f"rule {rule_name} {{")
         lines.append(f"    meta:")
         lines.append(f'        description = "Auto-generated rule for {os.path.basename(self.filepath)}"')
-        lines.append(f'        author = "sec-projects YARA Generator"')
+        lines.append(f'        author = "Cyber Lab YARA Generator"')
         lines.append(f'        hash_md5 = "{analysis["md5"]}"')
         lines.append(f'        hash_sha256 = "{analysis["sha256"]}"')
         lines.append(f'        filesize = {analysis["filesize"]}')

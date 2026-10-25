@@ -1,5 +1,5 @@
 // ============================================================
-// sec-projects v2 — Project Data Catalog
+// Cyber Lab v2 — Project Data Catalog
 // Central registry for all projects — drives search, filtering, rendering
 // ============================================================
 
