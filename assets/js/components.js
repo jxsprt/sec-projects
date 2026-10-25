@@ -1,5 +1,5 @@
 // ============================================================
-// sec-projects v2 — Shared Components
+// Cyber Lab v2 — Shared Components
 // Dynamic rendering: nav, cards, footer, breadcrumbs, etc.
 // ============================================================
 
@@ -11,7 +11,7 @@ function renderNav() {
     <div class="nav-inner">
       <a href="/" class="nav-logo">
         <span class="nav-logo-icon">&#x25C9;</span>
-        sec-projects
+        Cyber Lab
       </a>
       <div class="search-wrapper">
         <span class="search-icon">&#x1F50D;</span>
@@ -48,7 +48,7 @@ function renderFooter() {
   `;
   footer.innerHTML = `
     <p style="margin-bottom: var(--space-2);">
-      <strong>sec-projects</strong> — Hands-on cybersecurity projects for learners at every level.
+      <strong>Cyber Lab</strong> — Hands-on cybersecurity projects for learners at every level.
     </p>
     <p style="margin-bottom: 0;">
       Built by <a href="https://jaspreetsec.com">Jaspreet Singh</a> &middot;

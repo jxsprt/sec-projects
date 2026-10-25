@@ -1,5 +1,5 @@
 // ============================================================
-// sec-projects v2 — Main App
+// Cyber Lab v2 — Main App
 // Initializes everything: nav, search, sidebar, project grid
 // ============================================================
 

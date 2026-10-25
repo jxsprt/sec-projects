@@ -1,5 +1,5 @@
 // ============================================================
-// sec-projects v2 — Progress Tracking
+// Cyber Lab v2 — Progress Tracking
 // localStorage-based project progress: none → todo → in-progress → done
 // ============================================================
 
